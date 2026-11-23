@@ -1,0 +1,68 @@
+menu "Phase 2 WireGuard PoC"
+
+    menu "Wi-Fi"
+        config POC_WIFI_SSID
+            string "Wi-Fi SSID"
+            default ""
+        config POC_WIFI_PASSWORD
+            string "Wi-Fi password"
+            default ""
+        choice POC_WIFI_PS
+            prompt "Wi-Fi power save"
+            default POC_WIFI_PS_NONE
+            help
+                NONE gives the best throughput/latency; MIN_MODEM saves power.
+                Run the benchmark with both to compare.
+            config POC_WIFI_PS_NONE
+                bool "None (max performance)"
+            config POC_WIFI_PS_MIN_MODEM
+                bool "Min modem sleep (DTIM)"
+        endchoice
+    endmenu
+
+    menu "WireGuard"
+        config POC_WG_PRIVATE_KEY
+            string "ESP32 private key (base64, wg genkey)"
+            default ""
+        config POC_WG_PEER_PUBLIC_KEY
+            string "Linux peer public key (base64)"
+            default ""
+        config POC_WG_PRESHARED_KEY
+            string "Preshared key (optional, base64)"
+            default ""
+        config POC_WG_PEER_ENDPOINT
+            string "Linux peer endpoint (IP or hostname)"
+            default ""
+        config POC_WG_PEER_PORT
+            int "Linux peer UDP port"
+            default 51820
+        config POC_WG_LISTEN_PORT
+            int "Local UDP listen port"
+            default 51820
+        config POC_WG_LOCAL_IP
+            string "Tunnel IP of the ESP32"
+            default "10.66.0.2"
+        config POC_WG_LOCAL_NETMASK
+            string "Tunnel netmask"
+            default "255.255.255.0"
+        config POC_WG_KEEPALIVE
+            int "Persistent keepalive (s, 0 = off)"
+            default 25
+        config POC_WG_PEER_DOWN_RESTART_S
+            int "Restart tunnel if peer is down this long (s)"
+            default 60
+    endmenu
+
+    menu "Metrics / benchmark"
+        config POC_METRICS_PERIOD_S
+            int "Periodic metrics interval (s)"
+            default 10
+        config POC_TASKS_PERIOD_S
+            int "Task stack report interval (s)"
+            default 60
+        config POC_BENCH_TCP_TX_SECONDS
+            int "TCP source test duration (s)"
+            default 10
+    endmenu
+
+endmenu

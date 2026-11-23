@@ -1,0 +1,11 @@
+esp32-tailscale
+Copyright 2026 The esp32-tailscale Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project is an independent research effort. It is not affiliated with,
+endorsed by, or sponsored by Tailscale Inc. or Espressif Systems.
+"Tailscale" is a trademark of Tailscale Inc. "WireGuard" is a registered
+trademark of Jason A. Donenfeld. "ESP32" is a trademark of Espressif Systems.
+
+Third-party components and their licenses are listed in THIRD_PARTY_NOTICES.md.

@@ -1,0 +1,12 @@
+# Secrets (keys, Wi-Fi passwords)
+secrets/
+**/sdkconfig.secrets
+# ESP-IDF build outputs
+**/build/
+**/managed_components/
+**/dependencies.lock
+**/sdkconfig
+**/sdkconfig.old
+# Bench results
+results/
+__pycache__/
