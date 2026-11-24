@@ -232,7 +232,21 @@ Trần ~4 Mbit/s nằm trong ước lượng Phase 1 (1–4 Mbit/s cho đường
 | Stack còn trống thấp nhất | `ml_coord` 2,0 KB, `ml_wg_mgr` 2,2 KB, `ml_net_io` 2,6 KB, `tiT` 3,0 KB, `ml_derp_tx` 3,1 KB |
 | UDP echo 1 Hz (1800 gói) | p50 20 ms, p95 476 ms, max 1,0 s, **mất 6 %** |
 
-⚠️ Mất 6 % cao hơn các bài ngắn (0–2 %). Chưa phân biệt được do Wi‑Fi hay do chu kỳ rekey WireGuard (120 s): cần ghi thời điểm từng gói mất để đối chiếu.
+Mất 6 % cao hơn các bài ngắn (0–2 %); điều tra ở 9.4.1.
+
+#### 9.4.1. Điều tra mất gói (23:32–23:47, cùng phiên chạy, board không reboot)
+
+`tools/bench/ts_lossprobe.py` đo song song, 1 gói/s, ghi từng gói: **`tun`** = UDP echo qua tailnet, **`lan`** = ICMP thẳng tới IP LAN của board (lwIP trả lời, không qua tunnel). Đối chiếu với log serial.
+
+| | tun (tailnet) | lan (Wi‑Fi thuần) |
+|---|---|---|
+| Mất | 0,6 % (5 / 900) | 1,2 % (11 / 900) |
+| RTT p50 / p95 / p99 / max | 12 / 95 / 212 / 517 ms | 23 / 131 / 288 / 855 ms |
+
+- 3 / 5 lần mất của `tun` trùng lúc với lần mất của `lan`; không lần nào có dòng log của board trong ±3 s.
+- 8 lần rekey WireGuard trong 15 phút (laptop khởi tạo, cách nhau ~121 s): không lần nào trùng với gói mất.
+- **Kết luận:** tunnel không thêm mất gói hay độ trễ so với Wi‑Fi thuần. Mức 6 % của soak rơi vào lúc Wi‑Fi kém hơn (p95 476 ms so với 95 ms lúc điều tra); `wg_bench.py rtt` và probe đều tính gói trả lời sau 1 s là mất, nên đuôi độ trễ của Wi‑Fi bị tính thành mất gói. Soak sau nên chạy kèm `ts_lossprobe.py` để có baseline Wi‑Fi cùng lúc.
+- Ghi nhận thêm: board gửi *Endpoint update* (MapRequest `OmitPeers=true`) ~23 s một lần dù endpoint không đổi (theo chu kỳ STUN). Không gây lỗi, nhưng tốn traffic và điện: việc của Phase 4.
 
 ### 9.5. Đánh giá tiêu chí (chuyển từ Phase 2, mục 7)
 
@@ -248,7 +262,7 @@ Trần ~4 Mbit/s nằm trong ước lượng Phase 1 (1–4 Mbit/s cho đường
 
 ### 9.6. Việc còn lại
 
-1. Điều tra 6 % mất gói trong soak (log thời điểm mất, đối chiếu rekey / Wi‑Fi).
+1. ~~Điều tra 6 % mất gói~~: do Wi‑Fi, không do tunnel (9.4.1). Phase 4: bớt Endpoint update khi endpoint không đổi.
 2. Đo qua DERP từ một máy ngoài LAN (điện thoại 4G).
 3. Thử ACL chặn (ví dụ chỉ cho phép UDP 7) để kiểm tra PacketFilter trên thiết bị.
 4. Fuzz parser Noise / HTTP/2 chiều nhận (cần CI Linux + ASan, mục 8).
