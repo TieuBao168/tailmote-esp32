@@ -118,7 +118,8 @@ def parse_env_text(text, name="env"):
 
 
 def read_env_file(path):
-    return parse_env_text(path.read_text(encoding="utf-8"), path.name)
+    # utf-8-sig: Windows editors / PowerShell 5.1 Set-Content add a BOM
+    return parse_env_text(path.read_text(encoding="utf-8-sig"), path.name)
 
 
 def project():

@@ -188,3 +188,68 @@ Máy build là Windows, chỉ có MinGW gcc (không có clang / libFuzzer / ASan
 **Sau bản sửa cuối:** khoảng **9,8 triệu input, 0 lỗi** (5 seed × 60 s + 1 lượt 600 s). Trên board: netmap thật vẫn qua kiểm tra cú pháp và vẫn được cắt 17,7 / 21,2 KB; 0 cấp phát thất bại; heap thấp nhất 36 KB.
 
 **Chưa fuzz được:** parser khung Noise và HTTP/2 chiều nhận của MicroLink. Chúng là hàm `static` trong `ml_coord.c`, đọc thẳng từ socket. Cần một harness giả lập socket (stub `recv`) hoặc tách hàm, chạy trên CI Linux với ASan + libFuzzer, giống bộ test host có sẵn của MicroLink (`test/host`, dùng `-fsanitize=address,undefined`).
+
+## 9. Bước 3.5: test cuối (2026-11-24)
+
+Firmware `firmware/phase3-tailscale` (MicroLink v2.3.0 + bản vá mục 7–8), ESP32-D0WD rev 1.0 không PSRAM, Wi‑Fi mesh (AP gần nhất, RSSI −49…−52 dBm), Tailscale hosted, tailnet 4 máy. Máy đo: laptop Windows cùng LAN. Công cụ: `wg_bench.py` (RTT, UDP sink dồn chung cổng echo 7), `tools/bench/ts_recovery.py`, log serial `METRIC`. Số thô: `results/phase3/` (git-ignored).
+
+**Thay đổi firmware cho test:** cổng 7 vừa echo vừa làm UDP sink (`RST`/`STAT`, gói `SINK…`), vì mỗi socket MicroLink tốn ~11 KB RAM; test hook `WIFI_DOWN <s>` (`CONFIG_TM_TEST_HOOKS`, **tắt khi dùng thật**); tùy chọn `TS_DERP_REGION` trong form secrets.
+
+### 9.1. Hiệu năng, đường trực tiếp
+
+| Đo | Kết quả |
+|---|---|
+| RTT 64 B / 1200 B (200 gói) | p50 22 / 33 ms, p95 100 / 115 ms, mất 0,5 % |
+| UDP PC → ESP32, 1200 B | 0,5 / 1 / 2 Mbit/s: **mất 0 %**; 4 Mbit/s: 3,6 Mbit/s, mất 5 %; 8 Mbit/s: 4,1 Mbit/s (trần) |
+| TCP | chưa đo (firmware chưa có dịch vụ TCP qua API của MicroLink) |
+
+Trần ~4 Mbit/s nằm trong ước lượng Phase 1 (1–4 Mbit/s cho đường trực tiếp).
+
+### 9.2. DERP
+
+- Region mặc định của MicroLink là 9 (Dallas). Từ Việt Nam: `tailscale netcheck` cho Singapore (3) 27 ms, Dallas không nằm trong top 8 (> 176 ms). Đổi `TS_DERP_REGION=3`: kết nối DERP 4,2 s → **2,6 s** (TCP 254 → 34 ms), `CONNECTED` sau boot 11,5–13 s → **9,8 s**. Bộ cắt netmap giữ đúng region 3.
+- **Chưa đo được throughput/RTT qua relay từ laptop này:** chặn đường trực tiếp bằng Windows Firewall không có tác dụng (Tailscale for Windows cài bộ lọc WFP riêng, ưu tiên cao hơn), và các trường `enable_stun` / `enable_disco` của MicroLink bị bỏ qua. Cần đo từ một máy không đi thẳng được tới board (điện thoại dùng 4G).
+
+### 9.3. Phục hồi (probe UDP qua tailnet mỗi 0,5 s)
+
+| Kịch bản | Mất liên lạc | Thông lại sau khi hết nguyên nhân |
+|---|---|---|
+| Board mất Wi‑Fi 30 s | 36,8 s | **6,7 s** |
+| Board mất Wi‑Fi 120 s | 125,2 s | **4,8 s** |
+| Laptop `tailscale down` 30 s rồi `up` | 56,4 s | **5,4 s** |
+| Board reboot (≥ 7 lần trong các lượt chạy) | — | `CONNECTED` sau 9,8 s (DERP Singapore), 11,5–13 s (Dallas) |
+
+Đường dữ liệu thông lại trước khi control plane `CONNECTED` lại (~20 s sau khi có Wi‑Fi), vì phiên WireGuard còn hiệu lực. Trong lúc kết nối lại, heap thấp nhất 26,6 KB; không cấp phát thất bại, không lỗi parse.
+
+### 9.4. Soak 30 phút (theo lựa chọn rút gọn, 22:48–23:23)
+
+| | Kết quả |
+|---|---|
+| Reboot / panic / cấp phát thất bại / lỗi parse / kết nối lại | **0 / 0 / 0 / 0 / 0** |
+| Heap (sau 1 phút) | min / tb / max 57,1 / 67,5 / 68,9 KB; tb 10 mẫu đầu 68,3 KB → 10 mẫu cuối 68,2 KB (**không rò rỉ**) |
+| Heap thấp nhất / khối lớn nhất (min) | 40,5 KB / 28,7 KB |
+| CPU trung bình | core 0: 2,9 %, core 1: 1,2 % |
+| Stack còn trống thấp nhất | `ml_coord` 2,0 KB, `ml_wg_mgr` 2,2 KB, `ml_net_io` 2,6 KB, `tiT` 3,0 KB, `ml_derp_tx` 3,1 KB |
+| UDP echo 1 Hz (1800 gói) | p50 20 ms, p95 476 ms, max 1,0 s, **mất 6 %** |
+
+⚠️ Mất 6 % cao hơn các bài ngắn (0–2 %). Chưa phân biệt được do Wi‑Fi hay do chu kỳ rekey WireGuard (120 s): cần ghi thời điểm từng gói mất để đối chiếu.
+
+### 9.5. Đánh giá tiêu chí (chuyển từ Phase 2, mục 7)
+
+| Tiêu chí | Trạng thái |
+|---|---|
+| Board là node Tailscale, ping/UDP qua tailnet | ✅ |
+| RAM / Flash / CPU / stack trên firmware cuối | ✅ mục 7, 9.4 |
+| Throughput / latency đường trực tiếp | ✅ 9.1 (UDP); TCP chưa đo |
+| Throughput / latency qua DERP | ❌ chưa đo được từ máy này (9.2) |
+| Phục hồi khi mất Wi‑Fi / peer / reboot | ✅ 9.3 (Wi‑Fi mô phỏng từ phía board; chưa tắt AP thật, chưa mất control server riêng) |
+| Soak không reboot, heap không giảm dần | ✅ 30 phút (tiêu chí gốc 24 h: rút gọn theo yêu cầu) |
+| ACL / PacketFilter | ⚠️ chỉ policy mặc định (cho phép tất cả); chưa thử policy chặn |
+
+### 9.6. Việc còn lại
+
+1. Điều tra 6 % mất gói trong soak (log thời điểm mất, đối chiếu rekey / Wi‑Fi).
+2. Đo qua DERP từ một máy ngoài LAN (điện thoại 4G).
+3. Thử ACL chặn (ví dụ chỉ cho phép UDP 7) để kiểm tra PacketFilter trên thiết bị.
+4. Fuzz parser Noise / HTTP/2 chiều nhận (cần CI Linux + ASan, mục 8).
+5. Tắt `CONFIG_TM_TEST_HOOKS` và bật flash/NVS encryption cho bản dùng thật.

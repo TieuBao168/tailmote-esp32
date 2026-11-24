@@ -43,7 +43,7 @@ region pass before the key pass. With these two rules pruning is idempotent
 
 The text keeps its length and stays valid JSON (same buffers, same offsets).
 Both functions scan with constant memory (they run on the 9 KB `ml_coord`
-stack). Host test: `firmware/phase3-tailscale/test/test_json_prune.c` (21
+stack). Host test: `firmware/phase3-tailscale/test/test_json_prune.c` (23
 cases, run by `tm test` when gcc is available).
 
 **Result.** 17.7 KB of the 21.2 KB netmap pruned (2.2 KB keys + 15.5 KB DERP
