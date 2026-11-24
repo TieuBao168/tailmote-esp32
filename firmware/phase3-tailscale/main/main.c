@@ -12,6 +12,7 @@
  *   python tools/bench/wg_bench.py rtt --host <100.x.y.z>
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
@@ -40,6 +41,13 @@ static EventGroupHandle_t s_wifi_ev;
 static microlink_t *s_ml;
 static microlink_udp_socket_t *s_echo;
 static volatile uint32_t s_echo_rx;
+static volatile bool s_wifi_hold;   /* test hook: Wi-Fi kept down */
+
+/* UDP sink counters (same STAT JSON as Phase 2 bench.c, for wg_bench.py udp-rx) */
+static struct {
+    uint32_t pkts, max_seq, reorder, last_seq, t_first, t_last;
+    uint64_t bytes;
+} s_sink;
 
 /* ------------------------------------------------------------- chip info -- */
 static void report_chip(void)
@@ -67,7 +75,9 @@ static void wifi_handler(void *arg, esp_event_base_t base, int32_t id, void *dat
         snprintf(extra, sizeof(extra), "\"reason\":%d", d->reason);
         metrics_event("wifi_disconnected", extra);
         xEventGroupClearBits(s_wifi_ev, WIFI_GOT_IP_BIT);
-        esp_wifi_connect();
+        if (!s_wifi_hold) {          /* test hook WIFI_DOWN keeps it down */
+            esp_wifi_connect();
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *e = data;
         wifi_ap_record_t ap = {0};
@@ -153,9 +163,78 @@ static void on_peer(microlink_t *ml, const microlink_peer_info_t *p, void *arg)
     metrics_event("ml_peer", extra);
 }
 
+#if CONFIG_TM_TEST_HOOKS
+/* Drop Wi-Fi for `secs` from the device side, then reconnect: recovery test
+ * for Wi-Fi loss without touching the access point. */
+static void wifi_down_task(void *arg)
+{
+    uint32_t secs = (uint32_t)(uintptr_t)arg;
+    vTaskDelay(pdMS_TO_TICKS(1000));   /* let the "OK" reply leave first */
+    char extra[32];
+    snprintf(extra, sizeof(extra), "\"secs\":%u", (unsigned)secs);
+    metrics_event("test_wifi_down", extra);
+    s_wifi_hold = true;
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(secs * 1000));
+    s_wifi_hold = false;
+    metrics_event("test_wifi_up", NULL);
+    esp_wifi_connect();
+    vTaskDelete(NULL);
+}
+#endif
+
+/* One socket (each MicroLink UDP socket costs ~11 KB of RAM) multiplexes:
+ *   "RST" / "STAT"      UDP sink control (reply "OK" / JSON), as Phase 2;
+ *   "SINK"+u32 seq+...  sink data, counted, no reply (wg_bench.py --sink-prefix SINK);
+ *   "WIFI_DOWN <s>"     test hook (CONFIG_TM_TEST_HOOKS), reply "OK";
+ *   anything else       echoed back (wg_bench.py rtt). */
 static void on_echo_rx(microlink_udp_socket_t *sock, uint32_t src_ip, uint16_t src_port,
                        const uint8_t *data, size_t len, void *arg)
 {
+    if (len == 3 && memcmp(data, "RST", 3) == 0) {
+        memset(&s_sink, 0, sizeof(s_sink));
+        microlink_udp_send(sock, src_ip, src_port, "OK", 2);
+        return;
+    }
+    if (len == 4 && memcmp(data, "STAT", 4) == 0) {
+        char out[160];
+        int n = snprintf(out, sizeof(out),
+                         "{\"pkts\":%" PRIu32 ",\"bytes\":%" PRIu64 ",\"max_seq\":%" PRIu32
+                         ",\"reorder\":%" PRIu32 ",\"dur_ms\":%" PRIu32 "}",
+                         s_sink.pkts, s_sink.bytes, s_sink.max_seq, s_sink.reorder,
+                         s_sink.t_last - s_sink.t_first);
+        microlink_udp_send(sock, src_ip, src_port, out, n);
+        return;
+    }
+    if (len >= 8 && memcmp(data, "SINK", 4) == 0) {
+        uint32_t seq = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) |
+                       ((uint32_t)data[6] << 8) | data[7];
+        uint32_t now = metrics_ms();
+        if (s_sink.pkts && seq < s_sink.last_seq) {
+            s_sink.reorder++;
+        }
+        if (!s_sink.pkts) {
+            s_sink.t_first = now;
+        }
+        s_sink.last_seq = seq;
+        s_sink.max_seq = seq > s_sink.max_seq ? seq : s_sink.max_seq;
+        s_sink.t_last = now;
+        s_sink.pkts++;
+        s_sink.bytes += len;
+        return;
+    }
+#if CONFIG_TM_TEST_HOOKS
+    if (len > 10 && len < 16 && memcmp(data, "WIFI_DOWN ", 10) == 0) {
+        char num[8] = {0};
+        memcpy(num, data + 10, len - 10);
+        uint32_t secs = (uint32_t)atoi(num);
+        if (secs >= 1 && secs <= 600 &&
+            xTaskCreate(wifi_down_task, "tm_wifidn", 2560, (void *)(uintptr_t)secs, 3, NULL) == pdPASS) {
+            microlink_udp_send(sock, src_ip, src_port, "OK", 2);
+        }
+        return;
+    }
+#endif
     s_echo_rx++;
     microlink_udp_send(sock, src_ip, src_port, data, len);
 }

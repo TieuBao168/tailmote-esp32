@@ -43,7 +43,7 @@ SECRET_DEFAULTS = {
     "TUNNEL_NETMASK": "255.255.255.0", "TUNNEL_PREFIX": "24",
     "ESP_PRIVATE_KEY": "", "LINUX_PRIVATE_KEY": "", "PRESHARED_KEY": "",
     "WG_KEEPALIVE": "25", "WIFI_POWER_SAVE": "none", "SERIAL_PORT": "", "FLASH_BAUD": "460800",
-    "TS_AUTH_KEY": "", "TS_DEVICE_NAME": "tailmote-esp32",
+    "TS_AUTH_KEY": "", "TS_DEVICE_NAME": "tailmote-esp32", "TS_DERP_REGION": "",
 }
 
 # Firmware projects that get a generated sdkconfig.secrets (relative to ROOT).
@@ -260,6 +260,8 @@ def validate_secrets(s):
         errs.append("PRESHARED_KEY không hợp lệ")
     if s["TS_AUTH_KEY"] and not re.fullmatch(r"tskey-[A-Za-z0-9_-]+", s["TS_AUTH_KEY"]):
         errs.append("TS_AUTH_KEY phải có dạng tskey-auth-... (hoặc để trống để đăng nhập qua URL)")
+    if s["TS_DERP_REGION"] and not (s["TS_DERP_REGION"].isdigit() and 1 <= int(s["TS_DERP_REGION"]) <= 65535):
+        errs.append("TS_DERP_REGION phải là số region DERP (ví dụ 3 = Singapore) hoặc để trống")
     if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", s["TS_DEVICE_NAME"]):
         errs.append("TS_DEVICE_NAME: chữ thường, số, '-', tối đa 63 ký tự")
     return errs
@@ -282,6 +284,8 @@ def gen_ts_config(s, fw_dir):
         f"CONFIG_ML_TAILSCALE_AUTH_KEY={kconfig_str(s['TS_AUTH_KEY'])}",
         f"CONFIG_ML_DEVICE_NAME={kconfig_str(s['TS_DEVICE_NAME'])}",
     ]
+    if s["TS_DERP_REGION"]:
+        sdk.append(f"CONFIG_ML_DERP_REGION={int(s['TS_DERP_REGION'])}")
     _write_private(fw_dir / "sdkconfig.secrets", "\n".join(sdk) + "\n")
     ok(f"firmware Phase 3: {fw_dir / 'sdkconfig.secrets'}"
        + ("" if s["TS_AUTH_KEY"] else " (chưa có TS_AUTH_KEY: board sẽ in URL đăng nhập)"))

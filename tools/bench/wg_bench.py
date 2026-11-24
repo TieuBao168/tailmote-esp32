@@ -66,28 +66,32 @@ def rtt(host, count, size, interval, timeout):
     }
 
 
-def udp_ctrl(s, host, msg, timeout=2.0):
+def udp_ctrl(s, host, msg, timeout=2.0, port=None):
+    port = port or UDP_SINK
     s.settimeout(timeout)
     for _ in range(5):
-        s.sendto(msg, (host, UDP_SINK))
+        s.sendto(msg, (host, port))
         try:
             data, _ = s.recvfrom(2048)
             return data
         except socket.timeout:
             continue
-    raise RuntimeError(f"no reply to {msg!r} from {host}:{UDP_SINK}")
+    raise RuntimeError(f"no reply to {msg!r} from {host}:{port}")
 
 
-def udp_rx(host, rate_mbit, duration, size):
+def udp_rx(host, rate_mbit, duration, size, port=None, prefix=b""):
+    """port/prefix: the Phase 3 firmware multiplexes the sink on its echo port
+    (each MicroLink socket costs ~11 KB RAM) and wants b"SINK" before the seq."""
+    port = port or UDP_SINK
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_ctrl(s, host, b"RST")
+    udp_ctrl(s, host, b"RST", port=port)
     pps = rate_mbit * 1e6 / 8 / size
     gap = 1.0 / pps
-    pad = b"u" * (size - 4)
+    pad = b"u" * (size - 4 - len(prefix))
     sent, t_start = 0, time.perf_counter()
     next_t = t_start
     while time.perf_counter() - t_start < duration:
-        s.sendto(struct.pack("!I", sent + 1) + pad, (host, UDP_SINK))
+        s.sendto(prefix + struct.pack("!I", sent + 1) + pad, (host, port))
         sent += 1
         next_t += gap
         delay = next_t - time.perf_counter()
@@ -95,7 +99,7 @@ def udp_rx(host, rate_mbit, duration, size):
             time.sleep(delay)
     send_s = time.perf_counter() - t_start
     time.sleep(0.5)
-    st = json.loads(udp_ctrl(s, host, b"STAT"))
+    st = json.loads(udp_ctrl(s, host, b"STAT", port=port))
     s.close()
     dur = st["dur_ms"] / 1000 if st["dur_ms"] else send_s
     return {
@@ -144,6 +148,9 @@ def main():
     ap.add_argument("--duration", type=float, default=10.0)
     ap.add_argument("--label", default="", help="free text stored with results (e.g. 'tunnel, PS none')")
     ap.add_argument("--out", help="append JSON results to this file (one object per line)")
+    ap.add_argument("--sink-port", type=int, default=None, help="UDP sink port (default 5001; Phase 3: 7)")
+    ap.add_argument("--sink-prefix", default="", help="bytes before the sequence number (Phase 3: SINK)")
+    ap.add_argument("--rates", default="1,2,4,8", help="udp-rx rates for mode all, Mbit/s")
     a = ap.parse_args()
 
     results = []
@@ -162,9 +169,10 @@ def main():
         if a.mode == "all":
             attempt("rtt", rtt, a.host, a.count, 1200, a.interval, a.timeout)
     if a.mode in ("udp-rx", "all"):
-        rates = [a.rate] if a.mode == "udp-rx" else [1, 2, 4, 8]
+        rates = [a.rate] if a.mode == "udp-rx" else [float(x) for x in a.rates.split(",")]
         for r in rates:
-            attempt("udp-rx", udp_rx, a.host, r, a.duration, a.size or 1200, offered_mbit=r)
+            attempt("udp-rx", udp_rx, a.host, r, a.duration, a.size or 1200, a.sink_port,
+                    a.sink_prefix.encode(), offered_mbit=r)
             time.sleep(1)
     if a.mode in ("tcp-rx", "all"):
         attempt("tcp-rx", tcp_rx, a.host, a.duration)

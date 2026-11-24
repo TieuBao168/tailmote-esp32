@@ -158,13 +158,17 @@ class GenConfig(unittest.TestCase):
             self.assertIn('CONFIG_ML_TAILSCALE_AUTH_KEY="tskey-auth-kAbc123CNTRL-xyz789"\n', sdk)
             self.assertIn('CONFIG_ML_DEVICE_NAME="tailmote-esp32"\n', sdk)
             self.assertNotIn("CONFIG_POC_", sdk)
+            self.assertNotIn("CONFIG_ML_DERP_REGION", sdk)
+            tm.gen_config(dict(s, TS_DERP_REGION="3"), d / "s", d / "fw2", d / "fw3")
+            self.assertIn("CONFIG_ML_DERP_REGION=3\n", (d / "fw3" / "sdkconfig.secrets").read_text())
 
     def test_ts_validation(self):
         base = dict(tm.SECRET_DEFAULTS, WIFI_SSID="lab")
         self.assertEqual(tm.validate_secrets(base), [])
         self.assertEqual(tm.validate_secrets(dict(base, TS_AUTH_KEY="tskey-auth-k1-abc")), [])
         for k, v in [("TS_AUTH_KEY", "not-a-key"), ("TS_AUTH_KEY", "tskey-auth-x y"),
-                     ("TS_DEVICE_NAME", "Bad_Name"), ("TS_DEVICE_NAME", "-x")]:
+                     ("TS_DEVICE_NAME", "Bad_Name"), ("TS_DEVICE_NAME", "-x"),
+                     ("TS_DERP_REGION", "sin"), ("TS_DERP_REGION", "0")]:
             with self.subTest(k=k, v=v):
                 self.assertTrue(tm.validate_secrets(dict(base, **{k: v})))
 

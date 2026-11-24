@@ -7,6 +7,14 @@ menu "tailmote Phase 3"
             Port 7 matches tools/bench/wg_bench.py rtt (UDP_ECHO), so
             `wg_bench.py rtt --host <100.x.y.z>` measures RTT/loss over the tailnet.
 
+    config TM_TEST_HOOKS
+        bool "Test hooks on the echo port (WIFI_DOWN <s>)"
+        default y
+        help
+            Lets any tailnet peer allowed by the ACL to reach the echo port
+            drop the board's Wi-Fi for 1-600 s (recovery tests, docs/03
+            section 9). Turn off for anything but test firmware.
+
     menu "MicroLink task stacks (bytes)"
         comment "Defaults sized from the measured high-water marks (docs/03 section 7) + >= 2 KB margin"
         config TM_ML_NET_IO_STACK
