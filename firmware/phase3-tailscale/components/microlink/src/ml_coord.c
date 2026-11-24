@@ -23,6 +23,7 @@
 
 #include "microlink_internal.h"
 #include "ml_filter.h"
+#include "ml_json_prune.h"  /* [tailmote patch] */
 #include "x25519.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -2035,6 +2036,20 @@ static void parse_derp_map_from_map(microlink_t *ml, cJSON *map_json) {
  * starts with '{' is taken as JSON without a prefix.
  * Returns the JSON offset (4 or 0) and sets *json_len (0 = unknown, use
  * what is there), or -1 if it is neither. */
+/* [tailmote patch] Shrink a MapResponse in place before cJSON builds its DOM
+ * (ml_json_prune.c): drop members MicroLink never reads and every DERP region
+ * except the home one. On ESP32 without PSRAM a 21 KB netmap (16 KB of it the
+ * full DERP map) otherwise fails to parse once the DERP TLS session is up. */
+static void prune_map(microlink_t *ml, char *json, size_t len, const char *what) {
+    const unsigned keep[] = { ml->derp_home_region, ML_DERP_REGION };
+    size_t keys = ml_json_prune(json, len, ML_JSON_PRUNE_MAP_KEYS);
+    size_t regions = ml_json_prune_derp_regions(json, len, keep, 2);
+    if (keys || regions) {
+        ESP_LOGI(TAG, "%s: pruned %u + %u (DERP regions) of %u bytes before parse",
+                 what, (unsigned)keys, (unsigned)regions, (unsigned)len);
+    }
+}
+
 static int map_json_offset(const uint8_t *b, size_t have, size_t *json_len) {
     if (have >= 5 && b[4] == '{') {
         size_t le = (size_t)b[0] | ((size_t)b[1] << 8) | ((size_t)b[2] << 16) | ((size_t)b[3] << 24);
@@ -2300,6 +2315,9 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
     char saved = parse_start[parse_len];
     parse_start[parse_len] = '\0';
 
+    /* [tailmote patch] drop members MicroLink never reads before building the DOM */
+    prune_map(ml, parse_start, parse_len, "MapResponse");
+
     cJSON *map_json = cJSON_Parse(parse_start);
     parse_start[parse_len] = saved;
 
@@ -2494,7 +2512,10 @@ static void log_map_health(cJSON *root) {
     }
 }
 
-static void lp_handle_message(microlink_t *ml, const char *json, size_t len) {
+/* [tailmote patch] json points into the writable lp.msg buffer and is pruned
+ * in place (ml_json_prune.c) before parsing. */
+static void lp_handle_message(microlink_t *ml, char *json, size_t len) {
+    prune_map(ml, json, len, "Long-poll message");
     cJSON *update_json = cJSON_ParseWithLength(json, len);
     if (!update_json) {
         ESP_LOGW(TAG, "Long-poll message: JSON parse failed (%u bytes)", (unsigned)len);
@@ -2674,7 +2695,7 @@ static int lp_drain_messages(microlink_t *ml) {
         }
         if (ml->coord_st.lp.msg_len - mpos - 4 < mlen) break;  /* incomplete message */
         if (mlen > 0) {
-            lp_handle_message(ml, (const char *)(m + 4), mlen);
+            lp_handle_message(ml, (char *)(m + 4), mlen);  /* [tailmote patch] lp.msg is writable */
         }
         mpos += 4 + mlen;
     }
@@ -2803,6 +2824,7 @@ static int do_read_initial_netmap(microlink_t *ml, ml_noise_state_t *noise) {
     }
 
     /* Parse the body (skipping the prefix), cut at msg_len. */
+    prune_map(ml, (char *)ml->coord_st.lp.msg + msg_off, msg_len, "Initial netmap");  /* [tailmote patch] */
     cJSON *map_json = cJSON_ParseWithLength((const char *)ml->coord_st.lp.msg + msg_off, msg_len);
     if (!map_json) {
         const char *err = cJSON_GetErrorPtr();

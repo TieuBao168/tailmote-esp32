@@ -22,6 +22,7 @@ set(SRCS
     "src/ml_at_validate.c"
     "src/ml_net_switch.c"
     "src/ml_config_httpd.c"
+    "src/ml_json_prune.c"   # [tailmote patch]
 )
 
 # WireGuard (wireguard-lwip, BSD-3-Clause) is compiled as part of this

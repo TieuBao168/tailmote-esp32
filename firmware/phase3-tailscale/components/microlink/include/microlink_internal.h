@@ -62,19 +62,39 @@ extern "C" {
 #define ML_TASK_APP_CORE        1
 #endif
 
+/* [tailmote patch] Task stacks can be overridden by the application's Kconfig
+ * (CONFIG_TM_ML_*_STACK, firmware/phase3-tailscale/main/Kconfig.projbuild):
+ * on ESP32 without PSRAM the defaults below cost 42 KB of internal RAM while
+ * the measured high-water marks need about half. */
+#ifdef CONFIG_TM_ML_NET_IO_STACK
+#define ML_TASK_NET_IO_STACK    CONFIG_TM_ML_NET_IO_STACK
+#else
 #define ML_TASK_NET_IO_STACK    (8 * 1024)
+#endif
 #define ML_TASK_NET_IO_PRIO     7
 #define ML_TASK_NET_IO_CORE     0
 
+#ifdef CONFIG_TM_ML_DERP_TX_STACK
+#define ML_TASK_DERP_TX_STACK   CONFIG_TM_ML_DERP_TX_STACK
+#else
 #define ML_TASK_DERP_TX_STACK   (14 * 1024)
+#endif
 #define ML_TASK_DERP_TX_PRIO    5
 #define ML_TASK_DERP_TX_CORE    0
 
+#ifdef CONFIG_TM_ML_COORD_STACK
+#define ML_TASK_COORD_STACK     CONFIG_TM_ML_COORD_STACK
+#else
 #define ML_TASK_COORD_STACK     (12 * 1024)
+#endif
 #define ML_TASK_COORD_PRIO      5
 #define ML_TASK_COORD_CORE      ML_TASK_APP_CORE
 
+#ifdef CONFIG_TM_ML_WG_MGR_STACK
+#define ML_TASK_WG_MGR_STACK    CONFIG_TM_ML_WG_MGR_STACK
+#else
 #define ML_TASK_WG_MGR_STACK    (8 * 1024)
+#endif
 #define ML_TASK_WG_MGR_PRIO     7
 #define ML_TASK_WG_MGR_CORE     ML_TASK_APP_CORE
 

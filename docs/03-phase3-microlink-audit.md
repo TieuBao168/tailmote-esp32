@@ -132,8 +132,44 @@ Từ laptop (Tailscale for Windows, cùng LAN): `tailscale ping` **đi thẳng**
 
 **Wi‑Fi mesh.** Lần chạy đầu board vào AP xa (−82 dBm): gói nhỏ qua được nhưng tải netmap chỉ nhận 1 segment rồi kẹt ~27 s và bị server reset, lặp vô hạn ở `RECONNECTING`. Sửa trong `main.c`: `scan_method = WIFI_ALL_CHANNEL_SCAN`, `sort_method = WIFI_CONNECT_AP_BY_SIGNAL` → board chọn AP gần (−49 dBm). Không cần đổi chỗ board.
 
-### Bước tiếp theo (3.3: ngân sách RAM)
+### Bước tiếp theo (3.3: ngân sách RAM): xem mục 7
 
 1. Thu nhỏ stack task theo số đo (giữ biên ≥ 2 KB) và `tiT` về 4–5 KB.
 2. Tìm thứ chiếm ~45 KB sau `CONNECTED` và đỉnh 16 B lúc khởi động (heap trace theo giai đoạn; mbedTLS dynamic buffer của DERP; socket echo 10.9 KB).
 3. Thử full netmap khi đang chạy (đổi ACL / thêm máy) để xem buffer 64 KB có cấp phát được không. Nếu không: buffer nhận netmap theo từng phần / parser streaming (điều kiện 2 của mục 1).
+
+## 7. Bước 3.3: ngân sách RAM (2026-11-24)
+
+Chẩn đoán thêm vào app: callback `heap_caps_register_failed_alloc_callback` (bỏ qua các lần MicroLink thử PSRAM rồi lùi về RAM thường: `caps` có `MALLOC_CAP_SPIRAM`), và METRIC `heap_low` mỗi khi heap thấp nhất giảm ≥ 2 KB, kèm trạng thái MicroLink.
+
+**Nguyên nhân thật của đỉnh 16 B:** ngay sau `CONNECTED`, control server gửi lại **netmap đầy đủ 21 KB** trên long-poll. Lúc đó phiên TLS tới DERP đã chiếm RAM; cây cJSON (2–3× text) làm heap cạn, cấp phát thất bại và tin nhắn bị bỏ: `Long-poll message: JSON parse failed (21186 bytes)`. Đây là **lỗi chức năng**: mọi netmap đầy đủ về sau (thêm máy, đổi ACL) cũng sẽ mất.
+
+Thành phần netmap (đo từ DERP map của laptop): **DERPMap ~16 KB** (28 region, 95 node) trên tổng 21 KB; MicroLink chỉ dùng region nhà.
+
+**Thay đổi** (chi tiết: `components/microlink/TAILMOTE_PATCHES.md`):
+
+| # | Thay đổi | Tác dụng |
+|---|---|---|
+| 1 | Stack task MicroLink theo số đo: net_io 8→6 KB, derp_tx 14→7 KB, coord 12→9 KB, wg_mgr 8→5 KB; `tiT` 6→4.5 KB | −16.5 KB cố định |
+| 2 | mbedTLS: `DYNAMIC_FREE_CONFIG_DATA`, `DYNAMIC_FREE_CA_CERT`, không giữ cert của peer | giảm RAM của phiên DERP |
+| 3 | `ml_json_prune()`: xóa (thay bằng dấu cách) 13 khóa MicroLink không đọc, ở mọi cấp | −2.2 KB text / netmap |
+| 4 | `ml_json_prune_derp_regions()`: chỉ giữ region DERP nhà (không có region nhà thì không cắt) | −15.5 KB text / netmap |
+
+**Kết quả** (cùng tailnet 4 máy):
+
+| | Trước 3.3 | Sau 3.3 |
+|---|---|---|
+| Heap sau `microlink_start` | 123 KB | **140 KB** |
+| Netmap đưa vào cJSON | 21.2 KB | **3.5 KB** (−84 %) |
+| Netmap long-poll sau `CONNECTED` | ❌ parse failed | ✅ |
+| Cấp phát thất bại | 1 (heap còn 16 B) | **0** |
+| Heap thấp nhất | 16–52 B | **36.4 KB** |
+| Heap ổn định / khối lớn nhất | 45 KB / 17 KB | **69 KB / 26.6 KB** |
+| Stack còn trống thấp nhất | — | `ml_coord` 2.0 KB, `ml_wg_mgr` 2.2 KB, `ml_net_io` 2.6 KB, `ml_derp_tx` 3.1 KB |
+| CONNECTED sau boot | 13.0 s | 11.5 s |
+
+Kết nối sau thay đổi: `tailscale ping` vẫn đi thẳng; UDP echo 64 B mất 2 %, 1200 B mất 0 %; RTT p50 27–47 ms (dao động theo Wi‑Fi trong lần đo này).
+
+**Sức chứa còn lại [E]:** sau cắt tỉa mỗi peer còn khoảng 1–1.5 KB text (≈ 3–4 KB trong cây cJSON). Heap thấp nhất 36 KB và khối lớn nhất 26 KB cho phép thêm khoảng **8 peer** (= `ML_MAX_PEERS`). Tailnet lớn hơn cần parser streaming.
+
+**Còn lại cho Phase 3:** đo lại sức chứa với tailnet thật > 4 máy; fuzz `ml_json_prune` cùng parser H2/Noise (bước 3.4); test cuối (3.5).

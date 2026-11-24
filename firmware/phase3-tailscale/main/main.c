@@ -26,6 +26,8 @@
 #include "esp_wifi.h"
 #include "esp_mac.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "esp_rom_sys.h"
 #include "nvs_flash.h"
 #include "microlink.h"
 #include "metrics.h"
@@ -158,13 +160,43 @@ static void on_echo_rx(microlink_udp_socket_t *sock, uint32_t src_ip, uint16_t s
     microlink_udp_send(sock, src_ip, src_port, data, len);
 }
 
+/* Any malloc that fails is a RAM-budget bug on this board: report it. Runs in
+ * the failing caller's context, so only ROM printf (no heap). */
+static void on_alloc_failed(size_t size, uint32_t caps, const char *func)
+{
+    /* MicroLink's ml_psram_malloc() asks for SPIRAM first and falls back to
+     * internal RAM; on this board (no PSRAM) every such probe "fails". */
+    if (caps & MALLOC_CAP_SPIRAM) {
+        return;
+    }
+    esp_rom_printf("METRIC {\"ev\":\"alloc_failed\",\"t_ms\":%u,\"size\":%u,\"caps\":%u,\"func\":\"%s\",\"largest\":%u}\n",
+                   (unsigned)metrics_ms(), (unsigned)size, (unsigned)caps, func ? func : "?",
+                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
+
+/* Report each new heap low-water mark (>= 2 KB lower than the last report)
+ * with the MicroLink state, to find what drives the startup minimum. */
+static void report_heap_low(void)
+{
+    static size_t last = SIZE_MAX;
+    size_t min = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+    if (last == SIZE_MAX || min + 2048 <= last) {
+        char extra[64];
+        snprintf(extra, sizeof(extra), "\"heap_min\":%u,\"state\":\"%s\"",
+                 (unsigned)min, state_name(microlink_get_state(s_ml)));
+        metrics_event("heap_low", extra);
+        last = min;
+    }
+}
+
 /* Once connected: open the echo socket and report the heap after the first
  * netmap, which is the number docs/03 section 3 asks for. */
 static void supervisor_task(void *arg)
 {
     bool reported = false;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(250));
+        report_heap_low();
         bool up = microlink_is_connected(s_ml);
         if (up && !s_echo) {
             metrics_heap_t before = metrics_heap_now();
@@ -185,6 +217,7 @@ static void supervisor_task(void *arg)
 
 void app_main(void)
 {
+    heap_caps_register_failed_alloc_callback(on_alloc_failed);
     report_chip();
 
     esp_err_t err = nvs_flash_init();

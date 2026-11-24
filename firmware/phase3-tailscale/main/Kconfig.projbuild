@@ -7,6 +7,22 @@ menu "tailmote Phase 3"
             Port 7 matches tools/bench/wg_bench.py rtt (UDP_ECHO), so
             `wg_bench.py rtt --host <100.x.y.z>` measures RTT/loss over the tailnet.
 
+    menu "MicroLink task stacks (bytes)"
+        comment "Defaults sized from the measured high-water marks (docs/03 section 7) + >= 2 KB margin"
+        config TM_ML_NET_IO_STACK
+            int "ml_net_io (upstream 8192, used ~3.4 KB)"
+            default 6144
+        config TM_ML_DERP_TX_STACK
+            int "ml_derp_tx (upstream 14336, used ~3.6 KB incl. TLS handshake)"
+            default 7168
+        config TM_ML_COORD_STACK
+            int "ml_coord (upstream 12288, used ~6.9 KB incl. MapResponse parse)"
+            default 9216
+        config TM_ML_WG_MGR_STACK
+            int "ml_wg_mgr (upstream 8192, used ~2.7 KB)"
+            default 5120
+    endmenu
+
     config TM_METRICS_PERIOD_S
         int "Periodic metrics interval (s)"
         default 10
