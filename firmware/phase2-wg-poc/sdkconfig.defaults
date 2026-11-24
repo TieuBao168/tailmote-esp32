@@ -22,7 +22,8 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 
 # lwIP: esp_wireguard runs crypto inside the tcpip thread
-CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=5120
+# 5120 left only 660 B free under light tunnel load (run 1, 2026-11-24).
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=6144
 CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU1=y
 
 # esp_wireguard 0.9.0 + IDF 5.x: the WireGuard netif keeps its device in netif->state.
