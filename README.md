@@ -7,8 +7,8 @@ Nghiên cứu đưa ESP32 (nền tảng: **ESP32 DOIT DevKit V1**) vào mạng T
 | Phase | Nội dung | Trạng thái |
 |---|---|---|
 | 1. Feasibility | [docs/01-feasibility-report.md](docs/01-feasibility-report.md) | Xong (v0.2): **GO có điều kiện** cho DOIT DevKit V1 |
-| 2. WireGuard PoC | [docs/02-phase2-wireguard-poc.md](docs/02-phase2-wireguard-poc.md), [firmware/phase2-wg-poc](firmware/phase2-wg-poc) | Tunnel **chạy được** trên board thật (Windows, IDF v5.3.6, 2026-11-24), lần đo đầu ở [mục 6](docs/02-phase2-wireguard-poc.md#6-kết-quả-đo--lần-chạy-1-2026-11-24). Còn: đo lại khi Wi‑Fi ổn định, recovery, power save, soak |
-| 3. Tailscale Integration | Fork/audit MicroLink, ts2021, DERP, DISCO, PacketFilter | Chưa bắt đầu |
+| 2. WireGuard PoC | [docs/02-phase2-wireguard-poc.md](docs/02-phase2-wireguard-poc.md), [firmware/phase2-wg-poc](firmware/phase2-wg-poc) | **PoC xong** (2026-11-24): tunnel chạy trên board thật, số đo ở [mục 6](docs/02-phase2-wireguard-poc.md#6-kết-quả-đo--lần-chạy-1-2026-11-24). Soak / throughput / recovery mất Wi‑Fi gộp vào test cuối Phase 3 |
+| 3. Tailscale Integration | Fork/audit MicroLink, ts2021, DERP, DISCO, PacketFilter | Đang làm: audit MicroLink |
 | 4. Optimization | Streaming JSON, tối ưu RAM, soak test | Chưa bắt đầu |
 
 ## Cấu trúc

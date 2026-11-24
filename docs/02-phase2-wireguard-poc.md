@@ -1,6 +1,6 @@
 # Phase 2 — WireGuard PoC trên ESP32 DOIT DevKit V1
 
-> **Trạng thái (2026-11-23):** đã có code và kế hoạch đo. **Chưa build, chưa chạy trên phần cứng** (chưa có module). Các bước build/run tóm tắt trong [README.md](../README.md#build--run).
+> **Trạng thái (2026-11-24): PoC xong, test cuối gộp vào Phase 3.** Tunnel WireGuard chạy trên board thật; đã đo RAM, Flash, CPU, stack, thời gian kết nối, recovery khi peer mất, PS min-modem (mục 6). Soak test, đo lại throughput và recovery khi mất Wi‑Fi **không làm ở Phase 2**: firmware Phase 3 thay phần lớn stack (control plane, DERP, TLS), nên các test đó chạy một lần trên firmware cuối (mục 7). Build/run: [README.md](../README.md#setup--build).
 
 Mục tiêu: chạy WireGuard trên board, nối với một peer Linux, và **thay các số ước lượng [E] trong báo cáo Phase 1 bằng số đo thật**: RAM, Flash, CPU, thời gian kết nối, throughput, latency, packet loss, thời gian phục hồi.
 
@@ -174,7 +174,16 @@ Nguyên nhân thời gian không đều: `esp_wireguardif_peer_is_up()` chỉ ki
 
 ## 7. Tiêu chí hoàn thành Phase 2
 
-- Tunnel lên ổn định, `ping 10.66.0.2` từ peer. ✅ (2026-11-24, peer Windows; chưa có số ổn định dài hạn)
-- Điền đủ bảng mục 6 cho cấu hình PS none; có ít nhất M6, M8, M9 cho PS min-modem.
-- Không reboot, heap không giảm dần trong soak test 24 h.
-- Cập nhật các mục **[E]** trong `docs/01-feasibility-report.md` (4.1, 4.4, 4.5) bằng số đo.
+Quyết định 2026-11-24: Phase 2 dừng ở mức PoC. Các tiêu chí còn lại **chuyển sang test cuối của Phase 3**, chạy trên firmware Tailscale-compatible bằng cùng bộ công cụ (`tm log`, `tm bench`, `tm metrics`, script M10).
+
+| Tiêu chí | Trạng thái |
+|---|---|
+| Tunnel lên ổn định, `ping 10.66.0.2` từ peer | ✅ 2026-11-24 (peer Windows) |
+| RAM / Flash / CPU / stack / thời gian kết nối của WireGuard (M1–M7) | ✅ mục 6 |
+| Recovery khi peer mất (M10, phần peer) | ✅ mục 6.3, sau bản vá liveness |
+| PS min-modem (M11) | ⚠️ định tính (RF xấu), mục 6.2 |
+| Throughput / latency trong RF tốt (M8, M9) | ➡️ Phase 3 (đo cả direct và qua DERP) |
+| Recovery khi mất Wi‑Fi AP, rút nguồn (M10) | ➡️ Phase 3 (thêm: mất control server, mất DERP) |
+| Soak 24 h không reboot, heap không giảm dần (M12) | ➡️ Phase 3 |
+| Dòng tiêu thụ (M13) | ➡️ Phase 3 / 4, tùy chọn |
+| Cập nhật mục **[E]** trong báo cáo Phase 1 | ➡️ Phase 3, cùng số RAM của TLS/DERP/control |
