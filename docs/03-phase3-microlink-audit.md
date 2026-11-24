@@ -95,3 +95,45 @@ Giới hạn chức năng theo README **[S]**: chỉ IPv4 trong tunnel; không d
 Lựa chọn ban đầu (để tham khảo), một control server:
 - **Tailscale (hosted):** đăng nhập tailscale.com, tạo một **auth key** (nên chọn *reusable* + *tagged* / *pre-approved*) và tự dán vào file credential (git-ignored); mình không xử lý khóa thay bạn. Cần thêm ít nhất một máy đã cài Tailscale để ping thử (laptop này được).
 - **Headscale (tự host):** server mã nguồn mở, cần Linux/Docker (máy này hiện không có). Phù hợp hơn cho test tự động về sau (CI QEMU của MicroLink đã dùng Headscale).
+
+## 6. Bước 3.2: chạy lần đầu trên board (2026-11-24, Tailscale hosted)
+
+Firmware `firmware/phase3-tailscale` (MicroLink v2.3.0, buffer netmap 64 KB, 8 peer), auth key *reusable* + `tag:esp`. Tailnet 4 máy (board + laptop Windows + điện thoại + 1 server offline).
+
+**Kết quả: board là một node Tailscale hoạt động.**
+
+| Mốc (từ lúc boot) | Thời gian | Ghi chú |
+|---|---|---|
+| Wi‑Fi có IP | 3.8 s | AP mạnh nhất, −49 dBm (xem dưới) |
+| Noise IK handshake / Register | 377 ms / 335 ms | `controlplane.tailscale.com:80` (lần chạy trước) |
+| Netmap đầu tiên | 1.8 s, 20 KB, 3 peer | `END_STREAM` sau 13 Noise frame |
+| `CONNECTED` (DERP lên) | **13.0 s** | IP tailnet `100.89.157.120` |
+
+Từ laptop (Tailscale for Windows, cùng LAN): `tailscale ping` **đi thẳng** `via 192.168.1.36:51820`, 15 ms; ICMP 15–32 ms; UDP echo (`wg_bench.py rtt`, 50 gói) p50 15 ms, p95 108 ms, mất 2 %.
+
+**RAM (internal, không PSRAM):**
+
+| Thời điểm | Heap trống | Khối lớn nhất |
+|---|---|---|
+| Boot | 259 KB | 128 KB |
+| Sau Wi‑Fi | 205 KB | 110 KB |
+| Sau `microlink_init` (−35.8 KB) | 169 KB | 110 KB |
+| Sau `microlink_start`, 4 task + socket (−45.9 KB) | **123 KB** | 110 KB |
+| Sau netmap + 3 peer | ~105 KB | 94 KB |
+| `CONNECTED` (thêm phiên TLS tới DERP) | 87 KB | 78 KB |
+| Sau socket echo (−10.9 KB) | 61 KB | 53 KB |
+| **Ổn định, 4 phút** | **42–45 KB** | **17 KB** |
+| **Thấp nhất (giây 12–22 sau boot)** | **16 B** | — |
+
+- Không rò rỉ: heap đứng yên quanh 45 KB suốt ~4 phút; không reboot, không panic, không log lỗi cấp phát.
+- ⚠️ **Đỉnh lúc khởi động chạm 16 B**: lúc DERP TLS, netmap, STUN/DISCO và socket echo cùng cấp phát. Chưa thấy cấp phát nào thất bại, nhưng không còn biên.
+- ⚠️ **Khối lớn nhất 17 KB ở trạng thái ổn định**: một lần nhận lại netmap đầy đủ cần buffer liền 64 KB (`ML_H2_BUFFER_SIZE_KB`) sẽ không cấp phát được. Cần kiểm chứng khi control server gửi full map (đổi ACL, thêm peer).
+- Stack còn dư (min free): `ml_derp_tx` 10.4 KB / 14 KB, `ml_coord` 5.1 KB / 12 KB, `ml_wg_mgr` 5.3 KB / 8 KB, `ml_net_io` 4.6 KB / 8 KB, `tiT` 4.7 KB / 6 KB → có thể thu hồi ~15–20 KB.
+
+**Wi‑Fi mesh.** Lần chạy đầu board vào AP xa (−82 dBm): gói nhỏ qua được nhưng tải netmap chỉ nhận 1 segment rồi kẹt ~27 s và bị server reset, lặp vô hạn ở `RECONNECTING`. Sửa trong `main.c`: `scan_method = WIFI_ALL_CHANNEL_SCAN`, `sort_method = WIFI_CONNECT_AP_BY_SIGNAL` → board chọn AP gần (−49 dBm). Không cần đổi chỗ board.
+
+### Bước tiếp theo (3.3: ngân sách RAM)
+
+1. Thu nhỏ stack task theo số đo (giữ biên ≥ 2 KB) và `tiT` về 4–5 KB.
+2. Tìm thứ chiếm ~45 KB sau `CONNECTED` và đỉnh 16 B lúc khởi động (heap trace theo giai đoạn; mbedTLS dynamic buffer của DERP; socket echo 10.9 KB).
+3. Thử full netmap khi đang chạy (đổi ACL / thêm máy) để xem buffer 64 KB có cấp phát được không. Nếu không: buffer nhận netmap theo từng phần / parser streaming (điều kiện 2 của mục 1).

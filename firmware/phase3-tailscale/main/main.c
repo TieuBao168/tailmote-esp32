@@ -24,6 +24,7 @@
 #include "esp_system.h"
 #include "esp_app_desc.h"
 #include "esp_wifi.h"
+#include "esp_mac.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "microlink.h"
@@ -69,9 +70,10 @@ static void wifi_handler(void *arg, esp_event_base_t base, int32_t id, void *dat
         const ip_event_got_ip_t *e = data;
         wifi_ap_record_t ap = {0};
         esp_wifi_sta_get_ap_info(&ap);
-        char extra[80];
-        snprintf(extra, sizeof(extra), "\"ip\":\"" IPSTR "\",\"rssi\":%d,\"channel\":%d",
-                 IP2STR(&e->ip_info.ip), ap.rssi, ap.primary);
+        char extra[112];
+        snprintf(extra, sizeof(extra),
+                 "\"ip\":\"" IPSTR "\",\"rssi\":%d,\"channel\":%d,\"bssid\":\"" MACSTR "\"",
+                 IP2STR(&e->ip_info.ip), ap.rssi, ap.primary, MAC2STR(ap.bssid));
         metrics_event("wifi_got_ip", extra);
         xEventGroupSetBits(s_wifi_ev, WIFI_GOT_IP_BIT);
     }
@@ -85,7 +87,15 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_handler, NULL));
-    wifi_config_t wc = { .sta = { .threshold.authmode = WIFI_AUTH_WPA2_PSK } };
+    /* Mesh networks expose several APs with the same SSID. The default
+     * fast scan joins the first one found, which here was often a far node
+     * at -77..-82 dBm (TCP stalls); a full scan sorted by signal picks the
+     * nearest one (seen at -53 dBm in Phase 2). */
+    wifi_config_t wc = { .sta = {
+        .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+        .scan_method = WIFI_ALL_CHANNEL_SCAN,
+        .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
+    } };
     strlcpy((char *)wc.sta.ssid, CONFIG_ML_WIFI_SSID, sizeof(wc.sta.ssid));
     strlcpy((char *)wc.sta.password, CONFIG_ML_WIFI_PASSWORD, sizeof(wc.sta.password));
     if (!strlen(CONFIG_ML_WIFI_PASSWORD)) {

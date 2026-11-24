@@ -8,7 +8,7 @@ Nghiên cứu đưa ESP32 (nền tảng: **ESP32 DOIT DevKit V1**) vào mạng T
 |---|---|---|
 | 1. Feasibility | [docs/01-feasibility-report.md](docs/01-feasibility-report.md) | Xong (v0.2): **GO có điều kiện** cho DOIT DevKit V1 |
 | 2. WireGuard PoC | [docs/02-phase2-wireguard-poc.md](docs/02-phase2-wireguard-poc.md), [firmware/phase2-wg-poc](firmware/phase2-wg-poc) | **PoC xong** (2026-11-24): tunnel chạy trên board thật, số đo ở [mục 6](docs/02-phase2-wireguard-poc.md#6-kết-quả-đo--lần-chạy-1-2026-11-24). Soak / throughput / recovery mất Wi‑Fi gộp vào test cuối Phase 3 |
-| 3. Tailscale Integration | [docs/03-phase3-microlink-audit.md](docs/03-phase3-microlink-audit.md) | Audit MicroLink xong: **GO có điều kiện**, build OK cho esp32 không PSRAM. Tiếp: chạy trên board với control server |
+| 3. Tailscale Integration | [docs/03-phase3-microlink-audit.md](docs/03-phase3-microlink-audit.md) | **Board là node Tailscale** (2026-11-24): đăng ký Tailscale hosted, ping trực tiếp 15 ms. Đang làm: ngân sách RAM (heap ổn định 45 KB, đỉnh khởi động sát 0), [docs/03 mục 6](docs/03-phase3-microlink-audit.md#6-bước-32-chạy-lần-đầu-trên-board-2026-11-24-tailscale-hosted) |
 | 4. Optimization | Streaming JSON, tối ưu RAM, soak test | Chưa bắt đầu |
 
 ## Cấu trúc
