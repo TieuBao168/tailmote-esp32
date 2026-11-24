@@ -35,6 +35,12 @@ parses (initial fetch, long-poll initial netmap, long-poll messages):
   not in the map (custom control server with its own DERP map), nothing is
   pruned so the upstream "first usable region" fallback still works.
 
+Both pruners run only on **well-formed JSON** (`json_valid()`: strict
+RFC 8259 syntax, constant memory, nesting ≤ 48); anything else is left
+untouched for `cJSON_Parse()` to reject as before. `prune_map()` runs the
+region pass before the key pass. With these two rules pruning is idempotent
+(see section 3).
+
 The text keeps its length and stays valid JSON (same buffers, same offsets).
 Both functions scan with constant memory (they run on the 9 KB `ml_coord`
 stack). Host test: `firmware/phase3-tailscale/test/test_json_prune.c` (21
@@ -47,3 +53,29 @@ steady free heap 69 KB, largest block 26.6 KB.
 **Limit.** A peer still costs its full entry (minus `Hostinfo`/`CapMap`). The
 next step for large tailnets is a streaming parser (docs/03 section 1,
 condition 2).
+
+## 3. Fuzzing (step 3.4)
+
+`firmware/phase3-tailscale/test/fuzz/`: `fuzz_json_prune.c` is a libFuzzer
+target (`LLVMFuzzerTestOneInput`); `driver.c` runs it without libFuzzer/ASan
+(MinGW gcc on Windows) with structure-aware generation + mutation, and puts
+every working buffer against a guard page so a one-byte overread faults.
+Oracles: only bytes → spaces, idempotent, valid stays valid, and for valid
+RFC JSON the pruned tree equals the input tree minus the dropped members
+(compared as serialised cJSON, so duplicate keys count). `tm fuzz --seconds N`;
+`tm test` runs 3 s of it.
+
+Bugs it found in this patch (all fixed, cases kept in `test/test_json_prune.c`
+or covered by the validator):
+
+| # | Input | Bug | Fix |
+|---|---|---|---|
+| 1 | `{"Node":null,"DERPMap":` (truncated) | `find_member()` returned the end index; caller read `s[n]` (1-byte overread) | return 0 when no value follows |
+| 2 | malformed region + key pass | key pass stopped at an error, region pass then blanked the error, a 2nd pass pruned more | regions first, then keys |
+| 3 | `{"DNSConfig":{..} "Debug":..}` (missing comma) | a pruned member turned the next value into a key | error if a pruned member is not followed by `,` or `}` |
+| 4 | `"k":¢"}` | literal skipping swallowed a `"`, shifting string boundaries | literals only `true`/`false`/`null`/number chars |
+| 5 | `}},,"DNSConfig"` (double comma) | tolerant scanner accepted it; pruning made it acceptable to the region pass | prune only when `json_valid()` passes |
+
+After the last fix: ~9.8 million inputs (5 × 60 s + 600 s), 0 failures. The
+real Tailscale netmap still passes `json_valid()` and is pruned as before
+(checked on the board).

@@ -13,8 +13,8 @@
  * result is still valid JSON of the same length, so the buffer and the
  * callers' offsets stay as they are; cJSON skips whitespace for free.
  *
- * Malformed input is left as it is from the first error on (the caller's
- * cJSON_Parse then reports it as before).
+ * Malformed input (as far as this scanner can tell) is left untouched; the
+ * caller's cJSON_Parse then reports it as before.
  */
 #include "ml_json_prune.h"
 
@@ -41,6 +41,24 @@ static size_t skip_ws(const char *s, size_t n, size_t i)
         i++;
     }
     return i;
+}
+
+/* Index just past a literal (true / false / null / number characters), or 0. */
+static size_t skip_literal(const char *s, size_t n, size_t i)
+{
+    static const char *const WORDS[] = {"true", "false", "null"};
+    for (size_t w = 0; w < 3; w++) {
+        size_t l = strlen(WORDS[w]);
+        if (i + l <= n && memcmp(s + i, WORDS[w], l) == 0) {
+            return i + l;
+        }
+    }
+    size_t start = i;
+    while (i < n && ((s[i] >= '0' && s[i] <= '9') || s[i] == '-' || s[i] == '+' ||
+                     s[i] == '.' || s[i] == 'e' || s[i] == 'E')) {
+        i++;
+    }
+    return i > start ? i : 0;
 }
 
 /* Index just past the JSON value that starts at s[i], or 0 on error. */
@@ -74,12 +92,96 @@ static size_t skip_value(const char *s, size_t n, size_t i)
         }
         return 0;
     }
-    /* number, true, false, null */
-    while (i < n && s[i] != ',' && s[i] != '}' && s[i] != ']' &&
-           s[i] != ' ' && s[i] != '\t' && s[i] != '\n' && s[i] != '\r') {
-        i++;
+    return skip_literal(s, n, i);
+}
+
+/* Strict JSON syntax check of the whole buffer (one value, optional
+ * whitespace around it), constant memory, nesting <= PRUNE_MAX_DEPTH. Number
+ * spelling is not checked (only its characters); strings are only checked for
+ * termination. Both pruners run only when this passes: on well-formed JSON
+ * blanking whole members keeps it well formed, which makes pruning
+ * idempotent. The tolerant scanner it replaced let one pass turn malformed
+ * input into differently malformed input that the next pass pruned further
+ * (four cases found by the fuzzer: stray '"', missing / doubled commas). */
+static bool json_valid(const char *s, size_t n)
+{
+    enum { VALUE, VALUE_OR_END, KEY, KEY_OR_END, AFTER_VALUE } state = VALUE;
+    bool is_obj[PRUNE_MAX_DEPTH];
+    int top = -1;
+    size_t i = 0;
+
+    for (;;) {
+        i = skip_ws(s, n, i);
+        if (state == AFTER_VALUE && top < 0) {
+            return i == n;
+        }
+        if (i >= n) {
+            return false;
+        }
+        char c = s[i];
+        switch (state) {
+        case VALUE_OR_END:
+            if (c == ']') {
+                top--;
+                i++;
+                state = AFTER_VALUE;
+                break;
+            }
+            /* fall through */
+        case VALUE:
+            if (c == '{' || c == '[') {
+                if (++top >= PRUNE_MAX_DEPTH) {
+                    return false;
+                }
+                is_obj[top] = (c == '{');
+                state = (c == '{') ? KEY_OR_END : VALUE_OR_END;
+                i++;
+            } else {
+                size_t e = (c == '"') ? skip_string(s, n, i) : skip_literal(s, n, i);
+                if (!e) {
+                    return false;
+                }
+                i = e;
+                state = AFTER_VALUE;
+            }
+            break;
+        case KEY_OR_END:
+            if (c == '}') {
+                top--;
+                i++;
+                state = AFTER_VALUE;
+                break;
+            }
+            /* fall through */
+        case KEY: {
+            if (c != '"') {
+                return false;
+            }
+            size_t e = skip_string(s, n, i);
+            if (!e) {
+                return false;
+            }
+            i = skip_ws(s, n, e);
+            if (i >= n || s[i] != ':') {
+                return false;
+            }
+            i++;
+            state = VALUE;
+            break;
+        }
+        case AFTER_VALUE:
+            if (c == ',') {
+                state = is_obj[top] ? KEY : VALUE;
+                i++;
+            } else if (c == (is_obj[top] ? '}' : ']')) {
+                top--;
+                i++;
+            } else {
+                return false;
+            }
+            break;
+        }
     }
-    return i;
 }
 
 static bool key_dropped(const char *key, size_t len, const char *const *drop)
@@ -92,7 +194,13 @@ static bool key_dropped(const char *key, size_t len, const char *const *drop)
     return false;
 }
 
-size_t ml_json_prune(char *s, size_t n, const char *const *drop)
+/* One pass over the document. With write=false nothing is modified but the
+ * traversal is identical (dropped values are skipped the same way), so a dry
+ * run fails exactly where a writing run would stop. Returns the bytes blanked,
+ * or (size_t)-1 on a structural error (unterminated string, missing ':',
+ * unbalanced brackets, nesting deeper than PRUNE_MAX_DEPTH, trailing open
+ * container). */
+static size_t prune_pass(char *s, size_t n, const char *const *drop, bool write)
 {
     /* Per open container: is it an object, does the next string start a
      * member, and where is the comma before the current member (to blank
@@ -102,24 +210,21 @@ size_t ml_json_prune(char *s, size_t n, const char *const *drop)
     size_t prev_comma[PRUNE_MAX_DEPTH];
     int top = -1;
     size_t blanked = 0;
-    const size_t NONE = (size_t)-1;
+    const size_t NONE = (size_t)-1, ERR = (size_t)-1;
 
-    if (!s || !drop) {
-        return 0;
-    }
     for (size_t i = 0; i < n;) {
         char c = s[i];
         if (c == '{' || c == '[') {
             if (++top >= PRUNE_MAX_DEPTH) {
-                return blanked;            /* too deep: leave the rest */
+                return ERR;
             }
             is_obj[top] = (c == '{');
             want_key[top] = (c == '{');
             prev_comma[top] = NONE;
             i++;
         } else if (c == '}' || c == ']') {
-            if (top < 0) {
-                return blanked;
+            if (top < 0 || is_obj[top] != (c == '}')) {
+                return ERR;
             }
             top--;
             i++;
@@ -132,29 +237,41 @@ size_t ml_json_prune(char *s, size_t n, const char *const *drop)
         } else if (c == '"') {
             size_t end = skip_string(s, n, i);
             if (!end) {
-                return blanked;
+                return ERR;
             }
             if (top >= 0 && is_obj[top] && want_key[top]) {
                 want_key[top] = false;
                 if (key_dropped(s + i + 1, end - i - 2, drop)) {
                     size_t p = skip_ws(s, n, end);
                     if (p >= n || s[p] != ':') {
-                        return blanked;
+                        return ERR;
                     }
                     size_t v = skip_value(s, n, skip_ws(s, n, p + 1));
                     if (!v) {
-                        return blanked;
+                        return ERR;
                     }
-                    memset(s + i, ' ', v - i);
+                    if (write) {
+                        memset(s + i, ' ', v - i);
+                    }
                     blanked += v - i;
                     size_t after = skip_ws(s, n, v);
-                    if (after < n && s[after] == ',') {
-                        s[after] = ' ';            /* "k":v,  next member follows */
+                    if (after >= n || (s[after] != ',' && s[after] != '}')) {
+                        /* Missing comma: the next string would be read as a
+                         * value now but as a key once this member is blank,
+                         * so a second pass would prune more (fuzzer). */
+                        return ERR;
+                    }
+                    if (s[after] == ',') {
+                        if (write) {
+                            s[after] = ' ';        /* "k":v,  next member follows */
+                        }
                         blanked++;
                         want_key[top] = true;
                         after++;
                     } else if (prev_comma[top] != NONE) {
-                        s[prev_comma[top]] = ' ';  /* last member: drop the comma before it */
+                        if (write) {
+                            s[prev_comma[top]] = ' ';  /* last member: drop the comma before it */
+                        }
                         blanked++;
                         prev_comma[top] = NONE;
                     }
@@ -167,7 +284,21 @@ size_t ml_json_prune(char *s, size_t n, const char *const *drop)
             i++;
         }
     }
-    return blanked;
+    return top == -1 ? blanked : ERR;
+}
+
+size_t ml_json_prune(char *s, size_t n, const char *const *drop)
+{
+    if (!s || !drop) {
+        return 0;
+    }
+    /* All or nothing: prune only well-formed JSON, so malformed input
+     * reaches cJSON_Parse() untouched and pruning is idempotent. */
+    if (!json_valid(s, n)) {
+        return 0;
+    }
+    size_t r = prune_pass(s, n, drop, true);
+    return r == (size_t)-1 ? 0 : r;
 }
 
 /* Value index of member `key` of the object whose '{' is at s[obj], or 0. */
@@ -186,7 +317,9 @@ static size_t find_member(const char *s, size_t n, size_t obj, const char *key)
         }
         size_t v = skip_ws(s, n, p + 1);
         if (kend - i - 2 == klen && memcmp(s + i + 1, key, klen) == 0) {
-            return v;
+            /* Truncated after the ':' -> no value; callers read s[v]. (Found
+             * by the fuzzer: `{"DERPMap":` read one byte past the buffer.) */
+            return v < n ? v : 0;
         }
         size_t vend = skip_value(s, n, v);
         if (!vend) {
@@ -286,8 +419,8 @@ static size_t walk_regions(char *s, size_t n, size_t obj, const unsigned *keep, 
 
 size_t ml_json_prune_derp_regions(char *s, size_t n, const unsigned *keep, size_t nkeep)
 {
-    if (!s || !keep || !nkeep) {
-        return 0;
+    if (!s || !keep || !nkeep || !json_valid(s, n)) {
+        return 0;   /* malformed: leave it to cJSON_Parse() (see json_valid) */
     }
     size_t top = skip_ws(s, n, 0);
     if (top >= n || s[top] != '{') {

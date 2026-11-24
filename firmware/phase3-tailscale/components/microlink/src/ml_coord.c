@@ -2042,8 +2042,12 @@ static void parse_derp_map_from_map(microlink_t *ml, cJSON *map_json) {
  * full DERP map) otherwise fails to parse once the DERP TLS session is up. */
 static void prune_map(microlink_t *ml, char *json, size_t len, const char *what) {
     const unsigned keep[] = { ml->derp_home_region, ML_DERP_REGION };
-    size_t keys = ml_json_prune(json, len, ML_JSON_PRUNE_MAP_KEYS);
+    /* Regions first: on malformed input the key pass stops at the first
+     * error, and blanking a region afterwards could remove that error and
+     * let a second pass prune more (found by the fuzzer). This order makes
+     * the pair idempotent. */
     size_t regions = ml_json_prune_derp_regions(json, len, keep, 2);
+    size_t keys = ml_json_prune(json, len, ML_JSON_PRUNE_MAP_KEYS);
     if (keys || regions) {
         ESP_LOGI(TAG, "%s: pruned %u + %u (DERP regions) of %u bytes before parse",
                  what, (unsigned)keys, (unsigned)regions, (unsigned)len);

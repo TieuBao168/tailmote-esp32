@@ -145,6 +145,13 @@ int main(void)
                   "},\"OmitDefaultRegions\":false},\"Peers\":[]}");
     check_regions("home absent: untouched", dm, absent, 1, dm);
     check_regions("no DERPMap: untouched", "{\"Peers\":[{\"ID\":1}]}", home9, 2, "{\"Peers\":[{\"ID\":1}]}");
+    /* Regressions found by the fuzzer (test/fuzz). check_regions() copies into
+     * a buffer of exactly strlen() bytes, so with ASan / guard pages an
+     * overread past the end is caught here too. */
+    check_regions("truncated after DERPMap colon", "  \r\n {\"Node\":null,\"DERPMap\":", home9, 2,
+                  "  \r\n {\"Node\":null,\"DERPMap\":");
+    check_regions("truncated after Regions colon", "{\"DERPMap\":{\"Regions\":   ", home9, 2,
+                  "{\"DERPMap\":{\"Regions\":   ");
     check_regions("DERPMap nested in Node is ignored",
                   "{\"Node\":{\"DERPMap\":{\"Regions\":{\"1\":{}}}},\"PeersChanged\":[]}", home9, 2,
                   "{\"Node\":{\"DERPMap\":{\"Regions\":{\"1\":{}}}},\"PeersChanged\":[]}");

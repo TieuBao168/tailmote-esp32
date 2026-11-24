@@ -173,3 +173,18 @@ Kết nối sau thay đổi: `tailscale ping` vẫn đi thẳng; UDP echo 64 B m
 **Sức chứa còn lại [E]:** sau cắt tỉa mỗi peer còn khoảng 1–1.5 KB text (≈ 3–4 KB trong cây cJSON). Heap thấp nhất 36 KB và khối lớn nhất 26 KB cho phép thêm khoảng **8 peer** (= `ML_MAX_PEERS`). Tailnet lớn hơn cần parser streaming.
 
 **Còn lại cho Phase 3:** đo lại sức chứa với tailnet thật > 4 máy; fuzz `ml_json_prune` cùng parser H2/Noise (bước 3.4); test cuối (3.5).
+
+## 8. Bước 3.4: fuzz (2026-11-24)
+
+Máy build là Windows, chỉ có MinGW gcc (không có clang / libFuzzer / ASan). Cách làm:
+
+- **Target theo chuẩn libFuzzer** (`firmware/phase3-tailscale/test/fuzz/fuzz_json_prune.c`): chạy nguyên trạng với clang `-fsanitize=fuzzer,address,undefined` trên CI Linux sau này.
+- **Driver tự viết** (`driver.c`): sinh JSON có cấu trúc giống MapResponse (DERPMap/Regions với ID dạng số, khóa bị cắt ở mọi cấp, khóa trùng, khoảng trắng lạ) + đột biến (lật bit, chèn token, xóa/nhân đoạn, cắt cụt, ghép). Mỗi buffer đặt sát **guard page** (luân phiên đầu/cuối), đọc vượt 1 byte là crash.
+- **Oracle ngữ nghĩa** với cJSON của ESP-IDF build trên host: chỉ đổi byte thành dấu cách; idempotent; JSON hợp lệ vẫn hợp lệ; cây sau cắt = cây gốc trừ các khóa bị cắt và region không giữ.
+- Chạy: `tm fuzz --seconds N`; `tm test` chạy 3 giây.
+
+**Fuzzer tìm ra 5 lỗi trong bộ cắt JSON của bước 3.3** (chi tiết: `components/microlink/TAILMOTE_PATCHES.md`, mục 3), trong đó có **1 lỗi đọc vượt buffer** (netmap bị cắt cụt ngay sau `"DERPMap":`) và 4 trường hợp JSON hỏng khiến lượt cắt thứ hai cắt thêm. Sửa tận gốc: chỉ cắt khi cả tài liệu là JSON hợp lệ (kiểm tra cú pháp chặt, bộ nhớ cố định), cắt region trước, cắt khóa sau.
+
+**Sau bản sửa cuối:** khoảng **9,8 triệu input, 0 lỗi** (5 seed × 60 s + 1 lượt 600 s). Trên board: netmap thật vẫn qua kiểm tra cú pháp và vẫn được cắt 17,7 / 21,2 KB; 0 cấp phát thất bại; heap thấp nhất 36 KB.
+
+**Chưa fuzz được:** parser khung Noise và HTTP/2 chiều nhận của MicroLink. Chúng là hàm `static` trong `ml_coord.c`, đọc thẳng từ socket. Cần một harness giả lập socket (stub `recv`) hoặc tách hàm, chạy trên CI Linux với ASan + libFuzzer, giống bộ test host có sẵn của MicroLink (`test/host`, dùng `-fsanitize=address,undefined`).

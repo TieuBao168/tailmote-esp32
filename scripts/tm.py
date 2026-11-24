@@ -886,6 +886,50 @@ def cmd_metrics(args):
          "--csv", RESULTS_DIR / "periodic.csv", *args.rest])
 
 
+def host_cc():
+    """(compiler, PATH) for host C builds: gcc / cc / clang, also MSYS2 MinGW on Windows."""
+    extra = [r"C:\msys64\mingw64\bin", r"C:\msys64\ucrt64\bin"] if WINDOWS else []
+    path = os.pathsep.join(extra + [os.environ.get("PATH", "")])
+    for name in ("gcc", "cc", "clang"):
+        exe = shutil.which(name, path=path)
+        if exe:
+            return exe, path
+    return None, path
+
+
+def build_fuzz_driver(out_exe):
+    """Build firmware/phase3-tailscale/test/fuzz (driver + JSON pruner + cJSON from ESP-IDF)."""
+    cc, path = host_cc()
+    if not cc:
+        die("không có trình biên dịch C cho host (gcc / clang); Windows: cài MSYS2 MinGW")
+    p = project()
+    cjson = Path(p["IDF_PATH"]) / "components" / "json" / "cJSON"
+    if not (cjson / "cJSON.c").is_file():
+        die(f"không thấy cJSON tại {cjson} — chạy: tm idf")
+    fz = ROOT / FW_PHASE3 / "test" / "fuzz"
+    ml = ROOT / FW_PHASE3 / "components" / "microlink"
+    run([cc, "-std=c99", "-O2", "-g", "-Wall", "-Wextra", "-Werror", "-DFUZZ_GUARDED_ALLOC",
+         f"-I{ml / 'include'}", f"-I{cjson}", fz / "driver.c", fz / "fuzz_json_prune.c",
+         ml / "src" / "ml_json_prune.c", cjson / "cJSON.c", "-o", out_exe],
+        env=dict(os.environ, PATH=path))
+    return path
+
+
+@command("fuzz", "Fuzz bộ cắt JSON của MicroLink trên host (--seconds N, --seed S)")
+def cmd_fuzz(args):
+    ap = argparse.ArgumentParser(prog="tm fuzz")
+    ap.add_argument("--seconds", type=float, default=60)
+    ap.add_argument("--seed", type=int, default=0)
+    a = ap.parse_args(args.rest)
+    out = RESULTS_DIR / "fuzz"
+    out.mkdir(parents=True, exist_ok=True)
+    exe = out / ("fuzz_json_prune.exe" if WINDOWS else "fuzz_json_prune")
+    path = build_fuzz_driver(exe)
+    corpus = sorted((ROOT / FW_PHASE3 / "test" / "fuzz" / "corpus").glob("*"))
+    info(f"fuzz {a.seconds:g} s; input gây lỗi được lưu ở {out}")
+    run([exe, "-t", str(a.seconds), "-s", str(a.seed), *corpus], cwd=out, env=dict(os.environ, PATH=path))
+
+
 @command("test", "Unit test cho tooling (không cần board / ESP-IDF)")
 def cmd_test(args):
     run([sys.executable, "-m", "unittest", "discover", "-s", ROOT / "tests", "-v", *args.rest],
