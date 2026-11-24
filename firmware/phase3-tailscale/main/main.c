@@ -65,8 +65,50 @@ static void report_chip(void)
 }
 
 /* ------------------------------------------------------------------ Wi-Fi -- */
+/* After 3 "no AP found" in a row, scan once and log what the board can see,
+ * so a wrong SSID, a 5 GHz-only network or an unsupported security mode is
+ * obvious from the serial log. Runs in its own task: a scan cannot run while
+ * the event handler keeps calling esp_wifi_connect(). */
+static volatile bool s_scanning;
+
+static const char *auth_name(wifi_auth_mode_t m)
+{
+    switch (m) {
+    case WIFI_AUTH_OPEN: return "open";
+    case WIFI_AUTH_WEP: return "WEP";
+    case WIFI_AUTH_WPA_PSK: return "WPA";
+    case WIFI_AUTH_WPA2_PSK: return "WPA2";
+    case WIFI_AUTH_WPA_WPA2_PSK: return "WPA/WPA2";
+    case WIFI_AUTH_WPA3_PSK: return "WPA3";
+    case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2/WPA3";
+    default: return "other";
+    }
+}
+
+static void wifi_scan_task(void *arg)
+{
+    wifi_scan_config_t sc = { .show_hidden = true };
+    esp_wifi_disconnect();
+    if (esp_wifi_scan_start(&sc, true) == ESP_OK) {
+        uint16_t total = 0, n = 40;
+        static wifi_ap_record_t recs[40];
+        esp_wifi_scan_get_ap_num(&total);
+        esp_wifi_scan_get_ap_records(&n, recs);
+        printf("Wi-Fi scan: %u networks, showing %u (looking for \"%s\")\n", total, n, CONFIG_ML_WIFI_SSID);
+        for (uint16_t i = 0; i < n; i++) {
+            printf("METRIC {\"ev\":\"wifi_scan\",\"ssid\":\"%.32s\",\"rssi\":%d,\"channel\":%d,\"auth\":\"%s\"}\n",
+                   (const char *)recs[i].ssid, recs[i].rssi, recs[i].primary, auth_name(recs[i].authmode));
+        }
+    }
+    s_scanning = false;
+    esp_wifi_connect();
+    vTaskDelete(NULL);
+}
+
 static void wifi_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
+    static int no_ap_count;
+    static bool scanned;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
@@ -75,7 +117,14 @@ static void wifi_handler(void *arg, esp_event_base_t base, int32_t id, void *dat
         snprintf(extra, sizeof(extra), "\"reason\":%d", d->reason);
         metrics_event("wifi_disconnected", extra);
         xEventGroupClearBits(s_wifi_ev, WIFI_GOT_IP_BIT);
-        if (!s_wifi_hold) {          /* test hook WIFI_DOWN keeps it down */
+        no_ap_count = (d->reason == WIFI_REASON_NO_AP_FOUND) ? no_ap_count + 1 : 0;
+        if (no_ap_count >= 3 && !scanned &&
+            xTaskCreate(wifi_scan_task, "tm_scan", 3072, NULL, 3, NULL) == pdPASS) {
+            scanned = true;
+            s_scanning = true;
+            return;
+        }
+        if (!s_wifi_hold && !s_scanning) {   /* test hook WIFI_DOWN keeps it down */
             esp_wifi_connect();
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
