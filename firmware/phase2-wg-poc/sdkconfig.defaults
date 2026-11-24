@@ -25,6 +25,15 @@ CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=5120
 CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU1=y
 
+# esp_wireguard 0.9.0 + IDF 5.x: the WireGuard netif keeps its device in netif->state.
+# By default esp_netif also reads netif->state as its own esp_netif_t* in the lwIP
+# ext-callback (netif_add -> netif_set_addr -> esp_netif_internal_dhcpc_cb) and
+# panics (LoadProhibited) on the foreign netif. With the bridge option enabled IDF
+# stores esp_netif in netif->client_data instead (LWIP_ESP_NETIF_DATA=1), so the
+# WireGuard netif is ignored. The bridge itself is not used.
+CONFIG_ESP_NETIF_BRIDGE_EN=y
+CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=1
+
 # WireGuard component
 CONFIG_WIREGUARD_ESP_NETIF=y
 CONFIG_WIREGUARD_MAX_PEERS=1

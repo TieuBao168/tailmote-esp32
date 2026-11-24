@@ -4,7 +4,7 @@
 
 Mục tiêu: chạy WireGuard trên board, nối với một peer Linux, và **thay các số ước lượng [E] trong báo cáo Phase 1 bằng số đo thật**: RAM, Flash, CPU, thời gian kết nối, throughput, latency, packet loss, thời gian phục hồi.
 
-> Phase 2 là **WireGuard-compatible**, chưa phải Tailscale-compatible. Peer Linux ở đây là WireGuard thuần (`wg-quick`), không phải tailscaled.
+> Phase 2 là **WireGuard-compatible**, chưa phải Tailscale-compatible. Peer ở đây là WireGuard thuần (`wg-quick` trên Linux hoặc WireGuard for Windows), không phải tailscaled.
 
 ## 1. Cấu trúc
 
@@ -19,8 +19,8 @@ firmware/phase2-wg-poc/        ESP-IDF project (target esp32)
   sdkconfig.defaults           BT tắt, 240 MHz, FreeRTOS stats, tcpip trên core 1
   sdkconfig.secrets            (git-ignored) Wi-Fi + khóa WireGuard
 config/secrets.env.example     form bí mật → make secrets / make config
-scripts/                       setup, sinh cấu hình, build, peer (gọi qua Makefile)
-tools/bench/wg_bench.py        client đo RTT/loss/throughput (chạy trên Linux)
+scripts/tm.py                  setup, sinh cấu hình, build, peer (Linux: make, Windows: .	m)
+tools/bench/wg_bench.py        client đo RTT/loss/throughput (chạy trên máy peer)
 tools/bench/serial_capture.py  ghi log serial có timestamp
 tools/bench/parse_metrics.py   tóm tắt log METRIC → JSON/CSV
 ```
@@ -29,7 +29,7 @@ Thư viện WireGuard: [`trombik/esp_wireguard`](https://components.espressif.co
 
 ## 2–4. Môi trường, form bí mật, build
 
-Xem [README.md — Setup & Build](../README.md#setup--build). Tóm tắt:
+Xem [README.md — Setup & Build](../README.md#setup--build). Trên Windows thay `make <x>` bằng `.	m <x>` (mỗi lệnh một lần). Tóm tắt:
 
 ```bash
 make deps idf secrets
@@ -95,30 +95,50 @@ make metrics
 
 1. Tunnel đang lên, chạy `wg_bench.py rtt --count 100000 --interval 1`.
 2. Tắt Wi‑Fi AP (hoặc đổi mật khẩu tạm) 30 s → bật lại. Lặp với 5 phút.
-3. Khởi động lại `wg-quick` trên Linux (peer mất session) → board phải tự handshake lại (keepalive 25 s, restart tunnel sau 60 s peer down).
+3. Khởi động lại peer (`make peer-down peer-up`) (peer mất session) → board phải tự handshake lại (keepalive 25 s, restart tunnel sau 60 s peer down).
 4. Rút nguồn board → sau boot phải lên lại (kiểm tra SNTP trước handshake; nếu thiếu, Linux sẽ từ chối initiation có timestamp cũ).
 
-## 6. Bảng kết quả (điền sau khi đo)
+## 6. Kết quả đo — lần chạy 1 (2026-11-24)
+
+**Cấu hình:** ESP32-D0WD **rev v1.0** (DOIT DevKit V1, CH340, 4 MB flash), ESP-IDF v5.3.6, `esp_wireguard` 0.9.0, Wi‑Fi PS `none`, build và nạp trên **Windows 11** (`.\tm`), peer là **WireGuard for Windows** 1.1.1 trên cùng LAN. ESP32 ở 2.4 GHz, kênh 1/4, **RSSI −53 … −77 dBm**, mạng mesh có 3 BSSID và board chuyển AP nhiều lần. PC nối Wi‑Fi 5 GHz. Số liệu lấy từ log `METRIC` và `wg_bench.py`.
+
+> **Lưu ý quan trọng:** đường Wi‑Fi của ESP32 trong lần chạy này **không ổn định**: RSSI yếu, chuyển AP, có lúc mất gói hàng loạt. Baseline không tunnel cũng chậm và mất gói gần như tunnel, nên số throughput/latency dưới đây là **giới hạn của môi trường RF**, chưa phải giới hạn của WireGuard trên ESP32. Phải đo lại khi đặt board gần AP / dùng AP 2.4 GHz cố định.
 
 | Thông số | Giá trị | Ghi chú |
 |---|---|---|
-| Chip revision | | từ sự kiện `boot` |
-| Flash firmware / phần WireGuard | | |
-| DRAM tĩnh | | |
-| Heap trống sau Wi‑Fi / sau tunnel | | |
-| RAM WireGuard (connect + session) | | |
-| Block liền kề lớn nhất (min) | | |
-| CPU rảnh / khi tải (core 0 / core 1) | | |
-| Boot → Wi‑Fi IP / → SNTP / → tunnel | | |
-| RTT 64 B tunnel vs LAN (p50 / p95) | | |
-| UDP goodput tối đa, loss < 1 % | | |
-| TCP RX / TX | | |
-| Recovery sau mất Wi‑Fi 30 s / 5 phút | | |
-| Soak 24 h: reboot, heap min | | |
+| Chip revision | `rev` = 100 (v1.0) | chỉ Secure Boot V1 → nghiên cứu, không dùng cho sản phẩm |
+| Flash firmware / phần WireGuard | app 793 168 B (partition app còn 60 % trống); `libtrombik__esp_wireguard.a` 21 339 B (Flash 20 386 B, DRAM 953 B) | `tm size` |
+| DRAM tĩnh / IRAM | DRAM 47 636 B (26 %); IRAM 95 662 B (73 %) | |
+| Heap trống sau Wi‑Fi / sau tunnel | ~188 KB (`wifi_got_ip`) / ~186 KB (`wg_up`) | khi rảnh |
+| RAM WireGuard (connect + session) | 1 348 B + 1 560 B ≈ **2.9 KB** | `heap_delta` |
+| Block liền kề lớn nhất (min) | **110 592 B** | không đổi suốt lần chạy |
+| Heap min khi tải | 140 024 B | `heap_min` sau các bài UDP/TCP |
+| CPU rảnh / khi tải (core 0 / core 1) | 0.4–1.9 % / 0.1–0.6 %; khi tải tối đa 4.6 % / **23.6 %** | crypto chạy trong `tiT` (core 1); CPU không phải điểm nghẽn |
+| Boot → Wi‑Fi IP / → SNTP / → tunnel | 1.5–3.0 s / 4.8–6.5 s / **7.7 s** (handshake 1 160 ms) | SNTP tốn 0.4–5 s, có lần timeout 20 s |
+| RTT 64 B tunnel vs LAN (p50 / p95) | tunnel 19 / 157 ms (lúc tốt) … 135 / 396 ms; LAN 18 / 335 ms | dao động theo chất lượng Wi‑Fi, không tách được chi phí WireGuard |
+| UDP goodput, loss < 1 % | LAN: 1.07 Mbit/s tại 2 Mbit/s offered, loss 0 %; tunnel: chưa đạt loss < 1 % (64–94 % ở các lần chạy) | các lần đo không cùng thời điểm, xem lưu ý |
+| TCP RX / TX (PC→ESP / ESP→PC) | tunnel **0.66 / 0.83 Mbit/s**, LAN **0.81 / 0.88 Mbit/s** (cùng thời điểm); lần trước tunnel 0.32 / 1.95 | tunnel chậm hơn LAN 5–20 % |
+| Stack còn trống thấp nhất | `tiT` **660 B**, `sys_evt` 688 B, `b_usink` 900 B, `wg_sup` 3 360 B (stack 8 KB) | `tiT` sát ngưỡng 512 B, xem 6.2 |
+| Recovery sau mất Wi‑Fi 30 s / 5 phút | chưa đo | M10 |
+| Soak 24 h: reboot, heap min | chưa đo; 12 phút liên tục có tải: 0 reboot | M12 |
+| Power save `min_modem` | chưa đo | M11 |
+
+### 6.1. Lỗi gặp ở lần chạy đầu và cách sửa
+
+1. **Panic `LoadProhibited` trong `esp_wireguard_connect` → `netif_add`.** Ở IDF 5.x, `esp_netif` đăng ký ext-callback của lwIP cho *mọi* netif. Nó đọc `netif->state` như `esp_netif_t*`, trong khi netif WireGuard đặt struct riêng vào `netif->state`, nên callback deref sai và panic. Sửa trong `sdkconfig.defaults`: `CONFIG_ESP_NETIF_BRIDGE_EN=y` + `CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=1`. Khi đó IDF bật `LWIP_ESP_NETIF_DATA`, lưu `esp_netif` vào `netif->client_data` và bỏ qua netif lạ. Bridge không được dùng; firmware tăng ~500 B.
+2. **Stack overflow ở task `wg_sup`.** `esp_wireguard_connect()` tính X25519 (NaCl ref) ngay trên stack của task gọi, dùng ~4.8 KB > 4 096 B được cấp. Đã tăng lên 8 192 B (`main/wg_tunnel.c`); còn dư 3 360 B.
+3. (Tooling) `wg_bench.py` dừng cả lượt khi một bài lỗi và làm mất số đã đo. Giờ mỗi bài lỗi được ghi `"error"` rồi chạy tiếp.
+
+### 6.2. Việc còn lại
+
+- Đo lại M8/M9 trong môi trường RF tốt (RSSI > −60 dBm, AP cố định) để tách được chi phí WireGuard.
+- `tiT` còn 660 B khi tải nhẹ; trước khi chạy tải cao (UDP 8 Mbit/s, TCP kéo dài) nên tăng `CONFIG_LWIP_TCPIP_TASK_STACK_SIZE` từ 5 120 lên 6 144 rồi đo lại.
+- M10 (recovery), M11 (PS min-modem), M12 (soak 24 h), M13 (dòng tiêu thụ).
+- Cập nhật các mục **[E]** trong `docs/01-feasibility-report.md`. Số đo được tới giờ: heap rảnh có tunnel ~186 KB, block lớn nhất 110 KB, nằm trong ước lượng ~180–230 KB / ~100–110 KB.
 
 ## 7. Tiêu chí hoàn thành Phase 2
 
-- Tunnel lên ổn định, `ping 10.66.0.2` từ Linux.
+- Tunnel lên ổn định, `ping 10.66.0.2` từ peer. ✅ (2026-11-24, peer Windows; chưa có số ổn định dài hạn)
 - Điền đủ bảng mục 6 cho cấu hình PS none; có ít nhất M6, M8, M9 cho PS min-modem.
 - Không reboot, heap không giảm dần trong soak test 24 h.
 - Cập nhật các mục **[E]** trong `docs/01-feasibility-report.md` (4.1, 4.4, 4.5) bằng số đo.

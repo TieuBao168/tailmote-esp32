@@ -158,5 +158,7 @@ static void supervisor_task(void *arg)
 
 void wg_tunnel_start(void)
 {
-    xTaskCreatePinnedToCore(supervisor_task, "wg_sup", 4096, NULL, 5, NULL, 1);
+    /* esp_wireguard_connect() runs the NaCl reference X25519 (public key from the
+     * private key) on this task's stack: 4096 B overflowed on the first connect. */
+    xTaskCreatePinnedToCore(supervisor_task, "wg_sup", 8192, NULL, 5, NULL, 1);
 }
