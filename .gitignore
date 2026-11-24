@@ -10,3 +10,5 @@ secrets/
 # Bench results
 results/
 __pycache__/
+# Third-party code checked out for reading/audit only (Phase 3)
+.audit/
