@@ -260,10 +260,45 @@ Mất 6 % cao hơn các bài ngắn (0–2 %); điều tra ở 9.4.1.
 | Soak không reboot, heap không giảm dần | ✅ 30 phút (tiêu chí gốc 24 h: rút gọn theo yêu cầu) |
 | ACL / PacketFilter | ⚠️ chỉ policy mặc định (cho phép tất cả); chưa thử policy chặn |
 
-### 9.6. Việc còn lại
+### 9.6. Việc còn lại sau test cuối
 
 1. ~~Điều tra 6 % mất gói~~: do Wi‑Fi, không do tunnel (9.4.1). Phase 4: bớt Endpoint update khi endpoint không đổi.
-2. Đo qua DERP từ một máy ngoài LAN (điện thoại 4G).
-3. Thử ACL chặn (ví dụ chỉ cho phép UDP 7) để kiểm tra PacketFilter trên thiết bị.
-4. Fuzz parser Noise / HTTP/2 chiều nhận (cần CI Linux + ASan, mục 8).
-5. Tắt `CONFIG_TM_TEST_HOOKS` và bật flash/NVS encryption cho bản dùng thật.
+2. Đo qua DERP từ một máy ngoài LAN: **bỏ qua theo quyết định 2026-11-24** (mục 10).
+3. Thử ACL chặn: **bỏ qua theo quyết định 2026-11-24** (mục 10).
+4. Fuzz parser Noise / HTTP/2 chiều nhận: thay bằng rà soát tay phần trước xác thực (mục 10.2); harness fuzz cần Linux.
+5. ~~Bản dùng thật tắt test hook~~: `tm build --prod` (mục 10.1). Flash / NVS encryption: làm có chủ đích trên phần cứng sản phẩm.
+
+## 10. Hoàn tất Phase 3 (2026-11-24)
+
+Quyết định của chủ dự án: **bỏ qua** đo DERP từ máy ngoài LAN và test ACL chặn. Hai mục này ghi là chưa kiểm chứng (9.5).
+
+### 10.1. Profile build cho bản dùng thật
+
+`tm build --prod` thêm `firmware/phase3-tailscale/sdkconfig.prod.defaults` (sau `sdkconfig.defaults`, trước `sdkconfig.secrets`; đổi profile thì `sdkconfig` được tạo lại):
+
+- `CONFIG_TM_TEST_HOOKS=n`: kiểm tra trên board, `WIFI_DOWN 5` chỉ được echo lại, Wi‑Fi không bị ngắt.
+- Log mức WARN (cả ESP-IDF và MicroLink); dòng `METRIC` vẫn còn. Ảnh 966 KB (bản test 990 KB).
+- **Không** bật flash encryption / NVS encryption trong overlay: bật sẽ đốt eFuse ở lần boot đầu, không đảo ngược được, và chip rev 1.0 chỉ có Secure Boot V1. Làm có chủ đích trên phần cứng sản phẩm theo hướng dẫn flash encryption của ESP-IDF. Cho đến lúc đó khóa máy / node / disco và auth key nằm **không mã hóa** trong NVS và ảnh firmware.
+
+Board hiện chạy bản `--prod`, DERP Singapore.
+
+### 10.2. Rà soát tay phần nhận trước khi xác thực
+
+Sau khi bắt tay, mọi frame Noise được mã hóa xác thực (ChaCha20-Poly1305): HTTP/2 và JSON chỉ chứa dữ liệu của control server. Phần kẻ trên đường truyền (kênh điều khiển chạy cổng 80, bảo mật bằng Noise) có thể giả mạo là: phản hồi HTTP 101, msg2, frame "proactive" trước khi giải mã, và header 3 byte của mỗi frame. Đã đọc toàn bộ (`ml_coord.c`: `do_noise_handshake`, `complete_proactive_frames`, `process_proactive_frames`, `noise_recv_header`, `noise_recv`):
+
+| Chỗ | Kết quả |
+|---|---|
+| HTTP 101 | buffer 2048, đọc ≤ 2047 rồi kết thúc chuỗi; `strncmp` 12 ký tự; `strstr` tìm hết header (gặp NUL sớm thì lỗi) |
+| Phần thân sau header | buffer ≥ 512 B trước khi đọc nốt 3 byte header; `memcpy` theo độ dài |
+| msg2 | độ dài phải đúng 48 (bản sửa upstream af3a58e, 2026-11-16) |
+| Frame proactive | tổng ≤ 16 KB (`PROACTIVE_MAX_BYTES`), có kiểm tra tràn số; cấp phát tạm tối đa ~32 KB |
+| Header frame Noise | 16 ≤ độ dài ≤ 16 400, kiểm tra trước khi cấp phát |
+| Giải mã proactive | chỉ khi độ dài ≥ 16; ghép tối đa 1023 B, luôn kết thúc chuỗi |
+
+**Không thấy lỗi an toàn bộ nhớ.** Một điểm về độ bền: `rx_nonce` được đặt bằng số frame proactive đếm được, kể cả frame giải mã hỏng, nên kẻ trên đường truyền có thể chèn frame rác làm lệch nonce và buộc kết nối lại: chỉ là từ chối dịch vụ (kẻ đó vốn chặn được gói tin), không đọc hay sửa được dữ liệu. Fuzz tự động phần này vẫn nên làm trên Linux (ASan + libFuzzer, theo bộ test host có sẵn của MicroLink): biên dịch `ml_coord.c` trên Windows cần giả lập `sys/socket.h`, mbedTLS và FreeRTOS trong `microlink_t`.
+
+### 10.3. Kết luận Phase 3
+
+ESP32 DOIT DevKit V1 (ESP32-D0WD rev 1.0, **không PSRAM**, 4 MB flash) chạy được như **một node Tailscale** với control server chính thức: đăng ký, nhận netmap, DERP, đường trực tiếp qua DISCO, ACL mặc định áp trên thiết bị. Với tailnet 4 máy: CONNECTED sau 9,8 s; UDP trực tiếp tới ~4 Mbit/s; phục hồi < 7 s sau mất Wi‑Fi; soak 30 phút không lỗi, heap ổn định ~68 KB (thấp nhất 40,5 KB). Điều kiện: 8 bản vá cho MicroLink (`TAILMOTE_PATCHES.md`) và giới hạn ~8 peer cho tới khi có parser streaming.
+
+Chưa kiểm chứng: đường DERP từ máy ngoài LAN, ACL chặn, soak 24 h, fuzz Noise/H2 tự động, flash/NVS encryption.

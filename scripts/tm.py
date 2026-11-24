@@ -675,13 +675,18 @@ def cmd_config(args):
 SDKCONFIG_STAMP = "build/.sdkconfig-inputs.sha"
 
 
-def _refresh_sdkconfig(fw):
-    """sdkconfig.defaults/.secrets only apply when sdkconfig does not exist:
-    delete sdkconfig whenever either input changed since the last build.
-    Returns the inputs' hash; the caller stores it once build/ is a CMake dir
-    (idf.py set-target runs fullclean, which refuses a non-CMake build/)."""
+def _refresh_sdkconfig(fw, profile=""):
+    """sdkconfig.defaults/.secrets (and the profile overlay) only apply when
+    sdkconfig does not exist: delete sdkconfig whenever any input or the
+    profile changed since the last build. Returns the inputs' hash; the caller
+    stores it once build/ is a CMake dir (idf.py set-target runs fullclean,
+    which refuses a non-CMake build/)."""
     h = hashlib.sha256()
-    for name in ("sdkconfig.defaults", "sdkconfig.secrets"):
+    h.update(f"profile={profile}\n".encode())
+    names = ["sdkconfig.defaults", "sdkconfig.secrets"]
+    if profile:
+        names.insert(1, f"sdkconfig.{profile}.defaults")
+    for name in names:
         f = fw / name
         if f.is_file():
             h.update(f.read_bytes())
@@ -696,14 +701,23 @@ def _refresh_sdkconfig(fw):
     return h.hexdigest()
 
 
-@command("build", "Build firmware")
+@command("build", "Build firmware (--prod: bản dùng thật, không test hook, nếu firmware có sdkconfig.prod.defaults)")
 def cmd_build(args):
+    ap = argparse.ArgumentParser(prog="tm build")
+    ap.add_argument("--prod", action="store_true")
+    a = ap.parse_args(args.rest)
     p = project()
     fw = Path(p["FW_DIR"])
+    profile = ""
+    if a.prod:
+        if not (fw / "sdkconfig.prod.defaults").is_file():
+            die(f"{p['FW_PROJECT']} không có sdkconfig.prod.defaults")
+        profile = "prod"
+        info("profile prod: test hook tắt, log WARN (sdkconfig.prod.defaults)")
     if not (fw / "sdkconfig.secrets").is_file():
         info("CẢNH BÁO: chưa có sdkconfig.secrets (tm config) — firmware sẽ không kết nối Wi-Fi/WireGuard")
-    idf_env(p)
-    digest = _refresh_sdkconfig(fw)
+    idf_env(p)["TM_PROFILE"] = profile   # read by the firmware's CMakeLists.txt
+    digest = _refresh_sdkconfig(fw, profile)
     if not (fw / "sdkconfig").is_file():
         idf(p, "set-target", p["IDF_TARGET"])
     (fw / SDKCONFIG_STAMP).parent.mkdir(parents=True, exist_ok=True)

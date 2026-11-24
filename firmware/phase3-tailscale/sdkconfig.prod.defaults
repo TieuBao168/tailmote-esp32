@@ -1,0 +1,17 @@
+# Production overlay for firmware/phase3-tailscale (applied after
+# sdkconfig.defaults, before sdkconfig.secrets):  tm build --prod
+#
+# - No test hooks: WIFI_DOWN on the echo port would let any tailnet peer the
+#   ACL admits take the board offline.
+# - Warnings only in the logs (MicroLink's own INFO logs cost ~20 KB of flash
+#   and leak peer names / IPs to anyone on the serial port). METRIC lines are
+#   printf and stay.
+#
+# NOT set here, on purpose: flash encryption and NVS encryption. Enabling them
+# burns eFuses on first boot, which cannot be undone, and this board
+# (ESP32-D0WD rev 1.0) only has Secure Boot V1. Do it deliberately on the
+# production hardware, following ESP-IDF's flash-encryption guide
+# (docs/03 section 10).
+CONFIG_TM_TEST_HOOKS=n
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_ML_LOG_LEVEL_WARN=y

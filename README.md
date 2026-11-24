@@ -8,7 +8,7 @@ Nghiên cứu đưa ESP32 (nền tảng: **ESP32 DOIT DevKit V1**) vào mạng T
 |---|---|---|
 | 1. Feasibility | [docs/01-feasibility-report.md](docs/01-feasibility-report.md) | Xong (v0.2): **GO có điều kiện** cho DOIT DevKit V1 |
 | 2. WireGuard PoC | [docs/02-phase2-wireguard-poc.md](docs/02-phase2-wireguard-poc.md), [firmware/phase2-wg-poc](firmware/phase2-wg-poc) | **PoC xong** (2026-11-24): tunnel chạy trên board thật, số đo ở [mục 6](docs/02-phase2-wireguard-poc.md#6-kết-quả-đo--lần-chạy-1-2026-11-24). Soak / throughput / recovery mất Wi‑Fi gộp vào test cuối Phase 3 |
-| 3. Tailscale Integration | [docs/03-phase3-microlink-audit.md](docs/03-phase3-microlink-audit.md) | **Board là node Tailscale** (2026-11-24): đăng ký Tailscale hosted, ping trực tiếp 15 ms. **Board là node Tailscale chạy ổn định** (2026-11-24): UDP trực tiếp tới ~4 Mbit/s, phục hồi sau mất Wi‑Fi < 7 s, soak 30 phút 0 lỗi / không rò rỉ RAM ([docs/03 mục 9](docs/03-phase3-microlink-audit.md#9-bước-35-test-cuối-2026-11-24)). Còn: đo qua DERP, ACL chặn, fuzz Noise/H2 |
+| 3. Tailscale Integration | [docs/03-phase3-microlink-audit.md](docs/03-phase3-microlink-audit.md) | **Board là node Tailscale** (2026-11-24): đăng ký Tailscale hosted, ping trực tiếp 15 ms. **Xong** (2026-11-24): board là node Tailscale (không PSRAM), UDP trực tiếp ~4 Mbit/s, phục hồi < 7 s, soak 30 phút 0 lỗi; `tm build --prod` cho bản dùng thật ([docs/03 mục 9–10](docs/03-phase3-microlink-audit.md#10-hoàn-tất-phase-3-2026-11-24)). Chưa kiểm chứng: DERP ngoài LAN, ACL chặn, soak 24 h |
 | 4. Optimization | Streaming JSON, tối ưu RAM, soak test | Chưa bắt đầu |
 
 ## Cấu trúc
@@ -101,6 +101,8 @@ make config
 ```bash
 make build
 ```
+
+Bản dùng thật (Phase 3: tắt test hook, log WARN): `make build` → `python3 scripts/tm.py build --prod`, Windows `.	m build --prod`.
 
 ```bash
 make size
