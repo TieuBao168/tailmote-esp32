@@ -80,12 +80,18 @@ Giới hạn chức năng theo README **[S]**: chỉ IPv4 trong tunnel; không d
 
 | Bước | Việc | Đầu ra / tiêu chí |
 |---|---|---|
-| 3.1 | Nhúng MicroLink `v2.3.0@1cb8d1c` vào `firmware/phase3-tailscale/components/microlink` (commit nguyên bản trước, vá sau); app tối thiểu tái dùng `metrics.c`, `bench.c` của Phase 2 | build OK cho esp32, ảnh < 1.8 MB |
+| 3.1 ✅ | Nhúng MicroLink `v2.3.0@1cb8d1c` vào `firmware/phase3-tailscale/components/microlink` (commit nguyên bản trước, vá sau); app tối thiểu (`main/main.c`) + `metrics.c` của Phase 2; UDP echo cổng 7 cho `wg_bench.py rtt` | **Xong 2026-11-24:** build OK cho esp32, ảnh 990 KB (phân vùng còn 50 %) |
 | 3.2 | **Chạy lần đầu trên board**: đăng ký vào tailnet (Tailscale hosted + auth key, hoặc Headscale), ping từ một máy Tailscale | `heap_delta` từng giai đoạn: Noise/register, map, DERP TLS, WireGuard; heap min, khối lớn nhất |
 | 3.3 | Quyết định netmap: nếu 3.2 cho thấy dư > 40 KB với tailnet thật thì giữ cJSON + giới hạn peer; nếu không thì viết parser streaming cho MapResponse | số peer tối đa đo được |
 | 3.4 | Fuzz trên host (libFuzzer/AFL, chạy trên Linux CI) cho Noise frame, HTTP/2, JSON MapResponse | 0 crash sau N giờ |
 | 3.5 | **Test cuối** (chuyển từ Phase 2): soak 24 h, throughput direct và qua DERP, recovery khi mất Wi‑Fi / control / DERP / peer, PacketFilter | bảng kết quả + cập nhật mục **[E]** của báo cáo Phase 1 |
 
-**Cần từ bạn trước bước 3.2**, chọn một control server:
+**Chạy bước 3.2** (đã chọn Tailscale hosted):
+
+1. Tạo auth key ở https://login.tailscale.com/admin/settings/keys (Reusable + Pre-approved), dán vào `TS_AUTH_KEY` trong `secrets/secrets.env`. Bỏ trống thì board in URL đăng nhập ra cổng serial.
+2. `tm config`, `tm build`, `tm flash-monitor` (firmware mặc định giờ là `firmware/phase3-tailscale`, xem `config/project.env`).
+3. Kỳ vọng trên log: `ml_state` REGISTERING → CONNECTED, `ml_first_netmap`, rồi `ml_peer`. Từ một máy Tailscale: `ping <100.x.y.z>` và `python tools/bench/wg_bench.py rtt --host <100.x.y.z>`.
+
+Lựa chọn ban đầu (để tham khảo), một control server:
 - **Tailscale (hosted):** đăng nhập tailscale.com, tạo một **auth key** (nên chọn *reusable* + *tagged* / *pre-approved*) và tự dán vào file credential (git-ignored); mình không xử lý khóa thay bạn. Cần thêm ít nhất một máy đã cài Tailscale để ping thử (laptop này được).
 - **Headscale (tự host):** server mã nguồn mở, cần Linux/Docker (máy này hiện không có). Phù hợp hơn cho test tự động về sau (CI QEMU của MicroLink đã dùng Headscale).

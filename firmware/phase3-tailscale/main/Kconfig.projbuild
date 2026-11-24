@@ -1,0 +1,18 @@
+menu "tailmote Phase 3"
+
+    config TM_ECHO_PORT
+        int "UDP echo port on the tailnet IP (test service)"
+        default 7
+        help
+            Port 7 matches tools/bench/wg_bench.py rtt (UDP_ECHO), so
+            `wg_bench.py rtt --host <100.x.y.z>` measures RTT/loss over the tailnet.
+
+    config TM_METRICS_PERIOD_S
+        int "Periodic metrics interval (s)"
+        default 10
+
+    config TM_TASKS_PERIOD_S
+        int "Task stack report interval (s)"
+        default 60
+
+endmenu

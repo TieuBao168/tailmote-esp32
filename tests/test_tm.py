@@ -144,6 +144,30 @@ class GenConfig(unittest.TestCase):
             self.assertEqual((sec / "esp32.key").read_text().strip(), esp_priv)
             self.assertEqual((sec / "psk").read_text().strip(), psk)
 
+    def test_phase3_secrets(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            d = Path(d)
+            (d / "fw2").mkdir()
+            (d / "fw3").mkdir()
+            s = dict(tm.SECRET_DEFAULTS, WIFI_SSID='my "lab"', WIFI_PASSWORD="password123",
+                     WG_ENDPOINT="10.0.0.1", TS_AUTH_KEY="tskey-auth-kAbc123CNTRL-xyz789")
+            tm.gen_config(s, d / "s", d / "fw2", d / "fw3")
+            sdk = (d / "fw3" / "sdkconfig.secrets").read_text()
+            self.assertIn('CONFIG_ML_WIFI_SSID="my \\"lab\\""\n', sdk)
+            self.assertIn('CONFIG_ML_WIFI_PASSWORD="password123"\n', sdk)
+            self.assertIn('CONFIG_ML_TAILSCALE_AUTH_KEY="tskey-auth-kAbc123CNTRL-xyz789"\n', sdk)
+            self.assertIn('CONFIG_ML_DEVICE_NAME="tailmote-esp32"\n', sdk)
+            self.assertNotIn("CONFIG_POC_", sdk)
+
+    def test_ts_validation(self):
+        base = dict(tm.SECRET_DEFAULTS, WIFI_SSID="lab")
+        self.assertEqual(tm.validate_secrets(base), [])
+        self.assertEqual(tm.validate_secrets(dict(base, TS_AUTH_KEY="tskey-auth-k1-abc")), [])
+        for k, v in [("TS_AUTH_KEY", "not-a-key"), ("TS_AUTH_KEY", "tskey-auth-x y"),
+                     ("TS_DEVICE_NAME", "Bad_Name"), ("TS_DEVICE_NAME", "-x")]:
+            with self.subTest(k=k, v=v):
+                self.assertTrue(tm.validate_secrets(dict(base, **{k: v})))
+
     def test_no_peer_keepalive_when_disabled(self):
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
             d = Path(d)
