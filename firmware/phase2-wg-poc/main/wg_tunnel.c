@@ -129,26 +129,43 @@ static void supervisor_task(void *arg)
             continue;
         }
 
-        /* 3. Monitor */
+        /* 3. Monitor.
+         * esp_wireguardif_peer_is_up() only says a session key exists, so it
+         * stays true after the peer is gone (run 2, M10). Liveness comes from
+         * the time since the peer was last heard from (patched esp_wireguard):
+         * with keepalive on both ends something arrives every KEEPALIVE s.
+         *   stale   : nothing for KEEPALIVE + 15 s (WireGuard keepalive +
+         *             rekey timeouts)            -> wg_peer_stale
+         *   restart : nothing for PEER_DOWN_RESTART_S, or no session at all
+         *             -> wg_down "peer_timeout", reconnect with a new handshake */
         peer_down_since = 0;
+        const uint32_t stale_ms = (CONFIG_POC_WG_KEEPALIVE + 15) * 1000U;
+        const uint32_t restart_ms = CONFIG_POC_WG_PEER_DOWN_RESTART_S * 1000U;
         for (;;) {
             vTaskDelay(pdMS_TO_TICKS(1000));
             if (!wifi_has_ip()) {
                 disconnect("wifi_lost");
                 break;
             }
-            bool up = esp_wireguardif_peer_is_up(&s_ctx) == ESP_OK;
-            if (up != s_up) {
-                metrics_event(up ? "wg_peer_up" : "wg_peer_stale", NULL);
-                s_up = up;
+            uint32_t age_ms = 0;
+            bool session = esp_wireguardif_peer_rx_age_ms(&s_ctx, &age_ms) == ESP_OK;
+            bool live = session && (CONFIG_POC_WG_KEEPALIVE == 0 || age_ms < stale_ms);
+            if (live != s_up) {
+                char extra[40];
+                snprintf(extra, sizeof(extra), "\"rx_age_ms\":%lu", (unsigned long)age_ms);
+                metrics_event(live ? "wg_peer_up" : "wg_peer_stale", extra);
+                s_up = live;
             }
-            if (!up) {
+            if (!session) {
                 if (!peer_down_since) {
                     peer_down_since = metrics_ms();
-                } else if (metrics_ms() - peer_down_since > CONFIG_POC_WG_PEER_DOWN_RESTART_S * 1000U) {
+                } else if (metrics_ms() - peer_down_since > restart_ms) {
                     disconnect("peer_timeout");
                     break;
                 }
+            } else if (CONFIG_POC_WG_KEEPALIVE > 0 && age_ms > restart_ms) {
+                disconnect("peer_timeout");
+                break;
             } else {
                 peer_down_since = 0;
             }

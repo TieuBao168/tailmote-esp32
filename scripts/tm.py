@@ -322,6 +322,10 @@ def gen_config(s, secrets_dir, fw_dir):
     if psk:
         conf.append(f"PresharedKey = {psk}")
     conf.append(f"AllowedIPs = {s['ESP_TUNNEL_IP']}/32")
+    if int(s["WG_KEEPALIVE"]) > 0:
+        # The ESP32 detects a dead peer by the time since it last heard from it,
+        # so the peer must send keepalives too (firmware wg_tunnel.c, step 3).
+        conf.append(f"PersistentKeepalive = {s['WG_KEEPALIVE']}")
     _write_private(secrets_dir / "wg-esp.conf", "\n".join(conf) + "\n")
     ok(f"peer: {secrets_dir / 'wg-esp.conf'}")
 

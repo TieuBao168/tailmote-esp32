@@ -128,6 +128,7 @@ class GenConfig(unittest.TestCase):
             self.assertIn(f"PresharedKey = {psk}\n", conf)
             self.assertIn("AllowedIPs = 10.66.0.2/32\n", conf)
             self.assertIn("ListenPort = 51820\n", conf)
+            self.assertIn("PersistentKeepalive = 25\n", conf)
             self.assertNotIn("\r", conf)
 
             sdk = (fw / "sdkconfig.secrets").read_text()
@@ -142,6 +143,14 @@ class GenConfig(unittest.TestCase):
             tm.gen_config(s, sec, fw)
             self.assertEqual((sec / "esp32.key").read_text().strip(), esp_priv)
             self.assertEqual((sec / "psk").read_text().strip(), psk)
+
+    def test_no_peer_keepalive_when_disabled(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            d = Path(d)
+            (d / "fw").mkdir()
+            s = dict(tm.SECRET_DEFAULTS, WIFI_SSID="lab", WG_ENDPOINT="10.0.0.1", WG_KEEPALIVE="0")
+            tm.gen_config(s, d / "s", d / "fw")
+            self.assertNotIn("PersistentKeepalive", (d / "s" / "wg-esp.conf").read_text())
 
     def test_invalid_form_writes_nothing(self):
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()), \

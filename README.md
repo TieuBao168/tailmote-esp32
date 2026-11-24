@@ -21,6 +21,7 @@ scripts/install-deps.sh        `make deps`: gói apt (chỉ Linux)
 config/secrets.env.example     FORM bí mật (Wi-Fi, khóa, IP tunnel, cổng serial)
 config/project.env             Thiết lập không bí mật (phiên bản ESP-IDF, đường dẫn)
 firmware/phase2-wg-poc/        ESP-IDF project: WireGuard tunnel + đo RAM/CPU/timing + dịch vụ benchmark
+  components/esp_wireguard/    esp_wireguard 0.9.0 nhúng + vá (xem TAILMOTE_PATCHES.md)
 tools/bench/                   wg_bench.py (client đo), serial_capture.py, parse_metrics.py
 tests/                         Unit test cho tooling: `make test` / `.\tm test`
 docs/                          Báo cáo và hướng dẫn từng phase

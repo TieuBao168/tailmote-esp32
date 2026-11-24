@@ -127,6 +127,24 @@ esp_err_t esp_wireguard_set_default(wireguard_ctx_t *ctx);
 esp_err_t esp_wireguardif_peer_is_up(wireguard_ctx_t *ctx);
 
 /**
+ * @brief [tailmote patch] Time since the peer was last heard from.
+ *
+ * `esp_wireguardif_peer_is_up()` only reports that a session key exists, so it
+ * stays "up" after the peer has gone away. This returns the milliseconds since
+ * the later of: the last authenticated packet from the peer (data or
+ * keepalive) and the creation of the current session. Pair it with persistent
+ * keepalive on both ends to detect a dead peer.
+ *
+ * @param       ctx Context of WireGuard.
+ * @param[out]  age_ms Milliseconds since last contact.
+ * @return
+ *      - ESP_OK on success.
+ *      - ESP_ERR_INVALID_STATE when there is no valid session.
+ *      - ESP_ERR_INVALID_ARG when ctx is not connected.
+ */
+esp_err_t esp_wireguardif_peer_rx_age_ms(wireguard_ctx_t *ctx, uint32_t *age_ms);
+
+/**
  * @brief Disconnect from the peer
  *
  * @param ctx Context of WireGuard.

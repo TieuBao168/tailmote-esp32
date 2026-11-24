@@ -723,6 +723,32 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 	return result;
 }
 
+// [tailmote patch] Milliseconds since the peer was last heard from: the later
+// of the last authenticated data/keepalive packet (peer->last_rx) and the
+// creation of the current session (a completed handshake is contact too).
+// ERR_CONN when there is no valid session at all.
+err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms) {
+	struct wireguard_peer *peer;
+	err_t result;
+	u32_t ref;
+	if (!netif || !age_ms) {
+		return ERR_ARG;
+	}
+	result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result != ERR_OK) {
+		return result;
+	}
+	if (!peer->curr_keypair.valid && !peer->prev_keypair.valid) {
+		return ERR_CONN;
+	}
+	ref = peer->last_rx;
+	if (peer->curr_keypair.valid && (s32_t)(peer->curr_keypair.keypair_millis - ref) > 0) {
+		ref = peer->curr_keypair.keypair_millis;
+	}
+	*age_ms = wireguard_sys_now() - ref;
+	return ERR_OK;
+}
+
 err_t wireguardif_remove_peer(struct netif *netif, u8_t peer_index) {
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);

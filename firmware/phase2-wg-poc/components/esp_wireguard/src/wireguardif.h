@@ -137,6 +137,9 @@ void wireguardif_fini(struct netif *netif);
 // Is the given peer "up"? A peer is up if it has a valid session key it can communicate with
 err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *current_ip, u16_t *current_port);
 
+// [tailmote patch] Milliseconds since the peer was last heard from (see wireguardif.c)
+err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
+
 #ifdef __cplusplus
 }
 #endif

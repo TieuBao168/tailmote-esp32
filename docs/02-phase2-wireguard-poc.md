@@ -15,6 +15,7 @@ firmware/phase2-wg-poc/        ESP-IDF project (target esp32)
   main/wg_tunnel.c             SNTP → esp_wireguard connect → giám sát, tự kết nối lại
   main/metrics.c               dòng METRIC: heap, block lớn nhất, CPU% từng core, stack task
   main/bench.c                 UDP echo :7, UDP sink :5001, TCP sink :5002, TCP source :5003
+  components/esp_wireguard/    esp_wireguard 0.9.0 nhúng + vá liveness (TAILMOTE_PATCHES.md)
   partitions.csv               4 MB, 2×OTA 1.875 MB, coredump
   sdkconfig.defaults           BT tắt, 240 MHz, FreeRTOS stats, tcpip trên core 1
   sdkconfig.secrets            (git-ignored) Wi-Fi + khóa WireGuard
@@ -25,7 +26,7 @@ tools/bench/serial_capture.py  ghi log serial có timestamp
 tools/bench/parse_metrics.py   tóm tắt log METRIC → JSON/CSV
 ```
 
-Thư viện WireGuard: [`trombik/esp_wireguard`](https://components.espressif.com/components/trombik/esp_wireguard) 0.9.0 (BSD-3-Clause), lấy tự động qua ESP Component Manager. README của nó chỉ liệt kê IDF ≤ 4.4 + master, nhưng CMake có nhánh riêng cho IDF 5 — **khả năng tương thích với IDF v5.3 là một điểm cần xác nhận khi build**.
+Thư viện WireGuard: [`trombik/esp_wireguard`](https://components.espressif.com/components/trombik/esp_wireguard) 0.9.0 (BSD-3-Clause), **nhúng trong `components/esp_wireguard`** kèm một bản vá (phát hiện peer mất, mục 6.3). Đã xác nhận build và chạy với IDF v5.3.6, cần 2 tùy chọn Kconfig ở mục 6.1.
 
 ## 2–4. Môi trường, form bí mật, build
 
@@ -118,9 +119,9 @@ make metrics
 | RTT 64 B tunnel vs LAN (p50 / p95) | tunnel 19 / 157 ms (lúc tốt) … 135 / 396 ms; LAN 18 / 335 ms | dao động theo chất lượng Wi‑Fi, không tách được chi phí WireGuard |
 | UDP goodput, loss < 1 % | LAN: 1.07 Mbit/s tại 2 Mbit/s offered, loss 0 %; tunnel: chưa đạt loss < 1 % (64–94 % ở các lần chạy) | các lần đo không cùng thời điểm, xem lưu ý |
 | TCP RX / TX (PC→ESP / ESP→PC) | tunnel **0.66 / 0.83 Mbit/s**, LAN **0.81 / 0.88 Mbit/s** (cùng thời điểm); lần trước tunnel 0.32 / 1.95 | tunnel chậm hơn LAN 5–20 % |
-| Stack còn trống thấp nhất | `tiT` **660 B** (stack 5 120 B), `sys_evt` 688 B, `b_usink` 900 B, `wg_sup` 3 360 B (stack 8 KB) | đã tăng `tiT` lên 6 144 B → còn 1 684 B (6.3) |
+| Stack còn trống thấp nhất | `tiT` **660 B** (stack 5 120 B), `sys_evt` 688 B, `b_usink` 900 B, `wg_sup` 3 360 B (stack 8 KB) | đã tăng `tiT` lên 6 144 B → còn 1 684 B (6.2) |
 | Recovery sau mất Wi‑Fi 30 s / 5 phút | chưa đo (cần tắt AP thủ công) | M10 |
-| Recovery sau khi peer tắt 30 s / 120 s | tunnel thông lại **71 s** / **5 s** sau khi peer bật lại | M10, xem 6.3: firmware không phát hiện peer mất |
+| Recovery sau khi peer tắt 30 s / 120 s | tunnel thông lại **71 s** / **5 s** sau khi peer bật lại | M10, xem 6.2: firmware không phát hiện peer mất |
 | Soak 24 h: reboot, heap min | chưa đo; 12 phút liên tục có tải: 0 reboot | M12 |
 | Power save `min_modem` | RTT 64 B p50/p95 **155 / 367 ms**, 1200 B 222 / 473 ms, 0 % loss; TCP TX 0.17 Mbit/s; CPU rảnh 2–3 % / 0.5 % | M11, cùng điều kiện RF xấu như trên; UDP/TCP RX lỗi timeout |
 
@@ -130,7 +131,7 @@ make metrics
 2. **Stack overflow ở task `wg_sup`.** `esp_wireguard_connect()` tính X25519 (NaCl ref) ngay trên stack của task gọi, dùng ~4.8 KB > 4 096 B được cấp. Đã tăng lên 8 192 B (`main/wg_tunnel.c`); còn dư 3 360 B.
 3. (Tooling) `wg_bench.py` dừng cả lượt khi một bài lỗi và làm mất số đã đo. Giờ mỗi bài lỗi được ghi `"error"` rồi chạy tiếp.
 
-### 6.3. Lần chạy 2 (2026-11-24, chiều): M10 peer restart, M11 power save, stack `tiT`
+### 6.2. Lần chạy 2 (2026-11-24, chiều): M10 peer restart, M11 power save, stack `tiT`
 
 **Stack `tiT`.** `CONFIG_LWIP_TCPIP_TASK_STACK_SIZE` 5 120 → 6 144 B; `stack_free_min` của `tiT` còn 1 684 B suốt lần chạy M10.
 
@@ -148,10 +149,26 @@ Nguyên nhân thời gian không đều: `esp_wireguardif_peer_is_up()` chỉ ki
 
 **M11: Wi‑Fi PS `min_modem`.** Firmware ổn định (1 boot, 0 panic). RTT tăng mạnh so với `none` (p50 155 ms so với ~19 ms lúc mạng tốt) vì radio ngủ giữa các DTIM beacon. Throughput: TCP TX 0.17 Mbit/s, UDP/TCP RX timeout. Cùng điều kiện RF xấu nên chỉ dùng được để so sánh định tính. Chưa đo dòng tiêu thụ (M13).
 
-### 6.2. Việc còn lại
+### 6.3. Lần chạy 3 (2026-11-24): vá liveness của peer
+
+**Thay đổi.** Thêm `esp_wireguardif_peer_rx_age_ms()` vào `esp_wireguard` (nhúng, `components/esp_wireguard/TAILMOTE_PATCHES.md`). `wg_sup` dùng nó: `wg_peer_stale` khi không nhận gì trong `KEEPALIVE + 15` = 40 s, `wg_down peer_timeout` rồi handshake mới sau `POC_WG_PEER_DOWN_RESTART_S` = 45 s. Cấu hình peer từ `tm config` có thêm `PersistentKeepalive = 25`.
+
+**M10 chạy lại** (cùng kịch bản 6.2, thêm 1 lần nạp lại cấu hình peer ở đầu):
+
+| Peer tắt | Thông lại sau khi peer bật | Trước khi vá | Chuỗi sự kiện |
+|---|---|---|---|
+| 30 s | **15 s** | 71 s | `wg_peer_stale` (rx_age 40.3 s) → `wg_down peer_timeout` (+5 s) → `wg_up` (handshake 1.0 s) |
+| 120 s | **3.3 s** | 5 s | stale → `peer_timeout` → `handshake_failed` mỗi ~24 s → `wg_up` ngay khi peer lên |
+| nạp lại cấu hình peer | 46 s kể từ lúc peer restart | — | cùng cơ chế với dòng 30 s |
+
+- Không cảnh báo nhầm: 2 khoảng peer khỏe 44 s và 75 s không có `wg_peer_stale` (keepalive của peer tới đều).
+- 1 lần boot, 0 panic, heap 185 KB ổn định suốt 9 phút.
+- Giới hạn còn lại: một lần mất peer **ngắn** vẫn tốn tối đa ~45 s (thời gian chờ `peer_timeout`), vì ESP32 chưa tự handshake lại khi gửi mà không nhận được trả lời sau 15 s như WireGuard chuẩn. Muốn nhanh hơn: hạ `POC_WG_PEER_DOWN_RESTART_S`/keepalive (tốn thêm traffic), hoặc vá thêm cơ chế này trong `wireguardif.c`.
+
+### 6.4. Việc còn lại
 
 - Đo lại M8/M9 trong môi trường RF tốt (RSSI > −60 dBm, AP cố định) để tách được chi phí WireGuard.
-- **Phát hiện peer mất (từ M10):** cần liveness thật dựa trên `last_rx` của peer (vá `esp_wireguard`: expose `last_rx` hoặc làm cơ chế handshake lại khi không nhận được gì sau KEEPALIVE + REKEY_TIMEOUT), để `peer_timeout` hoạt động và recovery < ~30 s.
+- ~~Phát hiện peer mất~~: xong ở 6.3 (recovery 30 s peer down: 71 s → 15 s). Còn tùy chọn: handshake lại sau 15 s không nhận được trả lời như WireGuard chuẩn.
 - M10 phần mất Wi‑Fi AP 30 s / 5 phút và rút nguồn board; M11 đo lại khi RF ổn định; M12 (soak 24 h); M13 (dòng tiêu thụ).
 - Cập nhật các mục **[E]** trong `docs/01-feasibility-report.md`. Số đo được tới giờ: heap rảnh có tunnel ~186 KB, block lớn nhất 110 KB, nằm trong ước lượng ~180–230 KB / ~100–110 KB.
 

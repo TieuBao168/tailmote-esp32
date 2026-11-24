@@ -349,3 +349,18 @@ esp_err_t esp_wireguardif_peer_is_up(wireguard_ctx_t *ctx)
 fail:
     return err;
 }
+
+/* [tailmote patch] */
+esp_err_t esp_wireguardif_peer_rx_age_ms(wireguard_ctx_t *ctx, uint32_t *age_ms)
+{
+    err_t lwip_err;
+
+    if (!ctx || !ctx->netif || !age_ms) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    lwip_err = wireguardif_peer_rx_age(ctx->netif, wireguard_peer_index, age_ms);
+    if (lwip_err == ERR_CONN) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return lwip_err == ERR_OK ? ESP_OK : ESP_FAIL;
+}
