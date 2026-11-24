@@ -3,7 +3,7 @@
 # Copyright 2026 The esp32-tailscale Authors
 """Capture the ESP32 console to a log file (needs pyserial; the ESP-IDF venv has it).
 
-  serial_capture.py --port /dev/ttyUSB0 --out results/serial.log [--reset] [--seconds 600]
+  serial_capture.py --port /dev/ttyUSB0|COM7 --out results/serial.log [--reset] [--seconds 600]
 
 --reset pulses EN via RTS (DOIT DevKit V1 auto-reset circuit) so the log
 starts at boot and the boot-timing metrics are captured.
@@ -17,7 +17,7 @@ import time
 try:
     import serial
 except ImportError:
-    sys.exit("pyserial missing: run inside the ESP-IDF environment (. $IDF_PATH/export.sh) or pip install pyserial")
+    sys.exit("pyserial missing: run via `make log` / `.\tm log` (uses the ESP-IDF python) or pip install pyserial")
 
 
 def main():
@@ -38,7 +38,7 @@ def main():
         time.sleep(0.1)
         ser.rts = False
     t_end = time.time() + a.seconds if a.seconds else None
-    with open(a.out, "a", buffering=1) as f:
+    with open(a.out, "a", buffering=1, encoding="utf-8") as f:
         try:
             while t_end is None or time.time() < t_end:
                 raw = ser.readline()

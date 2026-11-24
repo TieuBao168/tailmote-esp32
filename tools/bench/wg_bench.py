@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The esp32-tailscale Authors
-"""Phase 2 benchmark client (runs on the Linux peer).
+"""Phase 2 benchmark client (runs on the WireGuard peer: Linux, macOS or Windows).
 
 Talks to the bench services in firmware/phase2-wg-poc (see main/bench.h).
 Point --host at the tunnel IP (10.66.0.2) to measure WireGuard, or at the
@@ -147,20 +147,30 @@ def main():
     a = ap.parse_args()
 
     results = []
+
+    def attempt(test, fn, *args, **extra):
+        # One failing test (lost control packet, refused connection) must not
+        # discard the results already measured: record the error and go on.
+        try:
+            results.append(fn(*args))
+        except (OSError, RuntimeError, ValueError) as e:
+            print(f"warning: {test} failed: {e}", file=sys.stderr)
+            results.append({"test": test, **extra, "error": str(e)})
+
     if a.mode in ("rtt", "all"):
-        results.append(rtt(a.host, a.count, a.size or 64, a.interval, a.timeout))
+        attempt("rtt", rtt, a.host, a.count, a.size or 64, a.interval, a.timeout)
         if a.mode == "all":
-            results.append(rtt(a.host, a.count, 1200, a.interval, a.timeout))
+            attempt("rtt", rtt, a.host, a.count, 1200, a.interval, a.timeout)
     if a.mode in ("udp-rx", "all"):
         rates = [a.rate] if a.mode == "udp-rx" else [1, 2, 4, 8]
         for r in rates:
-            results.append(udp_rx(a.host, r, a.duration, a.size or 1200))
+            attempt("udp-rx", udp_rx, a.host, r, a.duration, a.size or 1200, offered_mbit=r)
             time.sleep(1)
     if a.mode in ("tcp-rx", "all"):
-        results.append(tcp_rx(a.host, a.duration))
+        attempt("tcp-rx", tcp_rx, a.host, a.duration)
         time.sleep(1)
     if a.mode in ("tcp-tx", "all"):
-        results.append(tcp_tx(a.host))
+        attempt("tcp-tx", tcp_tx, a.host)
 
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
     for r in results:
@@ -171,6 +181,9 @@ def main():
         with open(a.out, "a") as f:
             for r in results:
                 f.write(json.dumps(r) + "\n")
+    failed = sum("error" in r for r in results)
+    if failed:
+        sys.exit(f"{failed}/{len(results)} test(s) failed — partial results above")
 
 
 if __name__ == "__main__":

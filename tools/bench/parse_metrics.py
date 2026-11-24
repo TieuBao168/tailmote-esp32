@@ -20,7 +20,7 @@ RE = re.compile(r"METRIC (\{.*\})")
 
 def load(path):
     out = []
-    with open(path, errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             m = RE.search(line)
             if not m:
