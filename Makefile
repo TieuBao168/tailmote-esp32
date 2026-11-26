@@ -12,59 +12,59 @@ LABEL ?=
 .PHONY: help doctor deps idf setup secrets config build size flash monitor flash-monitor \
         menuconfig clean fullclean docker-build peer-up peer-down peer-status log bench metrics test
 
-help: ## Danh sách lệnh
+help: ## List the commands
 	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z_-]+:.*## /{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 
-## ---- Môi trường ----
-doctor: ## Kiểm tra môi trường (không thay đổi gì)
+## ---- Environment ----
+doctor: ## Check the environment (changes nothing)
 	@$(TM) doctor
-deps: ## Cài gói apt cần thiết (sudo)
+deps: ## Install required apt packages (sudo)
 	@$(TM) deps
-idf: ## Clone + cài ESP-IDF và toolchain esp32
+idf: ## Clone and install ESP-IDF and the esp32 toolchain
 	@$(TM) idf
-setup: deps idf secrets ## deps + idf + tạo form secrets
-	@echo "Điền secrets/secrets.env rồi chạy: make config build"
+setup: deps idf secrets ## deps + idf + create the secrets form
+	@echo "Fill in secrets/secrets.env, then run: make config build"
 
-## ---- Cấu hình ----
-secrets: ## Tạo form secrets/secrets.env (không ghi đè)
+## ---- Configuration ----
+secrets: ## Create the secrets/secrets.env form (never overwrites)
 	@$(TM) secrets
-config: ## Kiểm tra form, sinh khóa + peer + sdkconfig.secrets
+config: ## Validate the form; generate keys, peer config and sdkconfig.secrets
 	@$(TM) config
 
 ## ---- Firmware ----
 build: ## Build firmware
 	@$(TM) build
-size: ## Báo cáo Flash/RAM tĩnh → results/
+size: ## Static flash/RAM report → results/
 	@$(TM) size
-flash: ## Nạp firmware (SERIAL_PORT trong form, trống = tự dò)
+flash: ## Flash the firmware (SERIAL_PORT from the form, empty = auto-detect)
 	@$(TM) flash
-monitor: ## Mở serial monitor (Ctrl+] để thoát)
+monitor: ## Open the serial monitor (Ctrl+] to exit)
 	@$(TM) monitor
-flash-monitor: ## Nạp rồi mở monitor
+flash-monitor: ## Flash, then open the monitor
 	@$(TM) flash-monitor
 menuconfig: ## idf.py menuconfig
 	@$(TM) menuconfig
 clean: ## idf.py clean
 	@$(TM) clean
-fullclean: ## Xóa build + sdkconfig
+fullclean: ## Remove build/ and sdkconfig
 	@$(TM) fullclean
-docker-build: ## Build bằng image espressif/idf (chỉ cần Docker)
+docker-build: ## Build with the espressif/idf image (needs only Docker)
 	@$(TM) docker-build
 
-## ---- Chạy / đo (cần board) ----
-peer-up: ## Bật WireGuard peer (sudo)
+## ---- Run / measure (needs a board) ----
+peer-up: ## Start the WireGuard peer (sudo)
 	@$(TM) peer-up
-peer-down: ## Tắt WireGuard peer
+peer-down: ## Stop the WireGuard peer
 	@$(TM) peer-down
 peer-status: ## wg show
 	@$(TM) peer-status
-log: ## Reset board và ghi log → results/serial.log
+log: ## Reset the board and capture its log → results/serial.log
 	@$(TM) log
-bench: ## Chạy bộ đo qua tunnel (HOST=<ip> để đo baseline LAN, LABEL=...)
+bench: ## Run the benchmarks over the tunnel (HOST=<ip> for a LAN baseline, LABEL=...)
 	@$(TM) bench $(if $(HOST),--host "$(HOST)") $(if $(LABEL),--label "$(LABEL)")
-metrics: ## Tóm tắt results/serial.log → results/periodic.csv
+metrics: ## Summarize results/serial.log → results/periodic.csv
 	@$(TM) metrics
 
-## ---- Phát triển ----
-test: ## Unit test cho tooling (không cần board / ESP-IDF)
+## ---- Development ----
+test: ## Unit tests for the tooling (no board / ESP-IDF needed)
 	@$(TM) test

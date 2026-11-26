@@ -3,12 +3,12 @@
 # Copyright 2026 The esp32-tailscale Authors
 """tailmote task runner: setup / config / build / flash / peer / bench.
 
-Chạy được trên Linux, macOS và Windows, chỉ cần Python 3.8+ (thư viện chuẩn).
+Runs on Linux, macOS and Windows; needs only Python 3.8+ (standard library).
 
-  Linux/macOS:  make <lệnh>            (hoặc: python3 scripts/tm.py <lệnh>)
-  Windows:      .\\tm <lệnh>            (hoặc: py scripts\\tm.py <lệnh>)
+  Linux/macOS:  make <cmd>            (or: python3 scripts/tm.py <cmd>)
+  Windows:      .\\tm <cmd>            (or: py scripts\\tm.py <cmd>)
 
-`tm help` liệt kê các lệnh.
+`tm help` lists the commands.
 """
 import argparse
 import base64
@@ -105,14 +105,14 @@ def parse_env_text(text, name="env"):
         try:
             toks = shlex.split(s, comments=False, posix=True)
         except ValueError as e:
-            die(f"{name}:{n}: {e} (thiếu dấu nháy?)")
+            die(f"{name}:{n}: {e} (missing quote?)")
         if len(toks) > 1 and not toks[1].startswith("#"):
-            die(f"{name}:{n}: cần dạng KEY='value' (giá trị có dấu cách phải nằm trong nháy)")
+            die(f"{name}:{n}: expected KEY='value' (values with spaces must be quoted)")
         if not toks or "=" not in toks[0]:
-            die(f"{name}:{n}: cần dạng KEY='value'")
+            die(f"{name}:{n}: expected KEY='value'")
         k, v = toks[0].split("=", 1)
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k):
-            die(f"{name}:{n}: tên biến không hợp lệ: {k}")
+            die(f"{name}:{n}: invalid variable name: {k}")
         out[k] = v
     return out
 
@@ -141,7 +141,7 @@ def project():
 def load_secrets(required=True):
     if not SECRETS_FILE.is_file():
         if required:
-            die(f"chưa có {SECRETS_FILE} — chạy: tm secrets")
+            die(f"{SECRETS_FILE} not found — run: tm secrets")
         return dict(SECRET_DEFAULTS)
     out = dict(SECRET_DEFAULTS)
     for k, v in read_env_file(SECRETS_FILE).items():
@@ -236,35 +236,35 @@ def kconfig_str(s):
 def validate_secrets(s):
     errs = []
     if not s["WIFI_SSID"]:
-        errs.append("WIFI_SSID trống")
+        errs.append("WIFI_SSID is empty")
     if len(s["WIFI_SSID"].encode()) > 32:
-        errs.append("WIFI_SSID dài hơn 32 byte")
+        errs.append("WIFI_SSID is longer than 32 bytes")
     if s["WIFI_PASSWORD"] and not 8 <= len(s["WIFI_PASSWORD"]) <= 63:
-        errs.append("WIFI_PASSWORD phải 8–63 ký tự (hoặc để trống cho mạng mở)")
+        errs.append("WIFI_PASSWORD must be 8–63 characters (or empty for an open network)")
     for v in ("LINUX_TUNNEL_IP", "ESP_TUNNEL_IP", "TUNNEL_NETMASK"):
         if not is_ip(s[v]):
-            errs.append(f"{v} không phải IPv4: '{s[v]}'")
+            errs.append(f"{v} is not an IPv4 address: '{s[v]}'")
     if s["LINUX_TUNNEL_IP"] == s["ESP_TUNNEL_IP"]:
-        errs.append("LINUX_TUNNEL_IP trùng ESP_TUNNEL_IP")
+        errs.append("LINUX_TUNNEL_IP equals ESP_TUNNEL_IP")
     if not (s["WG_PORT"].isdigit() and 0 < int(s["WG_PORT"]) < 65536):
-        errs.append("WG_PORT không hợp lệ")
+        errs.append("WG_PORT is invalid")
     if not (s["TUNNEL_PREFIX"].isdigit() and 0 <= int(s["TUNNEL_PREFIX"]) <= 32):
-        errs.append("TUNNEL_PREFIX phải 0–32")
+        errs.append("TUNNEL_PREFIX must be 0–32")
     if not s["WG_KEEPALIVE"].isdigit():
-        errs.append("WG_KEEPALIVE phải là số giây")
+        errs.append("WG_KEEPALIVE must be a number of seconds")
     if s["WIFI_POWER_SAVE"] not in ("none", "min_modem"):
         errs.append("WIFI_POWER_SAVE: none | min_modem")
     for v in ("ESP_PRIVATE_KEY", "LINUX_PRIVATE_KEY"):
         if s[v] and not is_key(s[v]):
-            errs.append(f"{v} không phải khóa WireGuard base64")
+            errs.append(f"{v} is not a base64 WireGuard key")
     if s["PRESHARED_KEY"] not in ("", "auto") and not is_key(s["PRESHARED_KEY"]):
-        errs.append("PRESHARED_KEY không hợp lệ")
+        errs.append("PRESHARED_KEY is invalid")
     if s["TS_AUTH_KEY"] and not re.fullmatch(r"tskey-[A-Za-z0-9_-]+", s["TS_AUTH_KEY"]):
-        errs.append("TS_AUTH_KEY phải có dạng tskey-auth-... (hoặc để trống để đăng nhập qua URL)")
+        errs.append("TS_AUTH_KEY must look like tskey-auth-... (or be empty to log in via URL)")
     if s["TS_DERP_REGION"] and not (s["TS_DERP_REGION"].isdigit() and 1 <= int(s["TS_DERP_REGION"]) <= 65535):
-        errs.append("TS_DERP_REGION phải là số region DERP (ví dụ 3 = Singapore) hoặc để trống")
+        errs.append("TS_DERP_REGION must be a DERP region number (e.g. 3 = Singapore) or empty")
     if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", s["TS_DEVICE_NAME"]):
-        errs.append("TS_DEVICE_NAME: chữ thường, số, '-', tối đa 63 ký tự")
+        errs.append("TS_DEVICE_NAME: lowercase letters, digits, '-', at most 63 characters")
     return errs
 
 
@@ -289,7 +289,7 @@ def gen_ts_config(s, fw_dir):
         sdk.append(f"CONFIG_ML_DERP_REGION={int(s['TS_DERP_REGION'])}")
     _write_private(fw_dir / "sdkconfig.secrets", "\n".join(sdk) + "\n")
     ok(f"firmware Phase 3: {fw_dir / 'sdkconfig.secrets'}"
-       + ("" if s["TS_AUTH_KEY"] else " (chưa có TS_AUTH_KEY: board sẽ in URL đăng nhập)"))
+       + ("" if s["TS_AUTH_KEY"] else " (no TS_AUTH_KEY: the board will print a login URL)"))
 
 
 def gen_config(s, secrets_dir, fw_dir, ts_fw_dir=None):
@@ -300,14 +300,14 @@ def gen_config(s, secrets_dir, fw_dir, ts_fw_dir=None):
     if not endpoint:
         endpoint = lan_ip() or ""
         if endpoint:
-            ok(f"WG_ENDPOINT tự động: {endpoint}")
+            ok(f"WG_ENDPOINT auto-detected: {endpoint}")
         else:
-            errs.append("không tự lấy được IP LAN, điền WG_ENDPOINT")
+            errs.append("could not detect the LAN IP; fill in WG_ENDPOINT")
     if errs:
         for e in errs:
             bad(e)
-        die(f"form có {len(errs)} lỗi — sửa {SECRETS_FILE} rồi chạy lại")
-    ok("form hợp lệ")
+        die(f"form has {len(errs)} error(s) — fix {SECRETS_FILE} and run again")
+    ok("form is valid")
 
     def key_for(name, val):
         kf = secrets_dir / f"{name}.key"
@@ -315,10 +315,10 @@ def gen_config(s, secrets_dir, fw_dir, ts_fw_dir=None):
             _write_private(kf, val + "\n")
         elif not kf.is_file():
             _write_private(kf, wg_genkey() + "\n")
-            ok(f"sinh khóa mới: {name}")
+            ok(f"generated new key: {name}")
         priv = kf.read_text(encoding="utf-8").strip()
         if not is_key(priv):
-            die(f"{kf} không chứa khóa WireGuard hợp lệ")
+            die(f"{kf} does not contain a valid WireGuard key")
         pub = wg_pubkey(priv)
         _write_private(secrets_dir / f"{name}.pub", pub + "\n")
         return priv, pub
@@ -337,8 +337,8 @@ def gen_config(s, secrets_dir, fw_dir, ts_fw_dir=None):
 
     conf = [
         "# Generated by scripts/tm.py config — do not commit.",
-        "# Linux/macOS: sudo wg-quick up <this file>  (hoặc: make peer-up)",
-        "# Windows:     WireGuard for Windows → Import tunnel  (hoặc: .\\tm peer-up, quyền admin)",
+        "# Linux/macOS: sudo wg-quick up <this file>  (or: make peer-up)",
+        "# Windows:     WireGuard for Windows → Import tunnel  (or: .\\tm peer-up, as administrator)",
         "[Interface]",
         f"Address = {s['LINUX_TUNNEL_IP']}/{s['TUNNEL_PREFIX']}",
         f"ListenPort = {s['WG_PORT']}",
@@ -448,7 +448,7 @@ def serial_port(s=None):
     ports = usb_serial_ports()
     if ports:
         if len(ports) > 1:
-            info(f"nhiều cổng USB-serial: {', '.join(p for p, _ in ports)} — dùng {ports[0][0]} (đặt SERIAL_PORT để chọn)")
+            info(f"several USB-serial ports: {', '.join(p for p, _ in ports)} — using {ports[0][0]} (set SERIAL_PORT to choose)")
         return ports[0][0]
     return None
 
@@ -463,7 +463,7 @@ def check_idf_paths(p):
     if WINDOWS:
         for k in ("IDF_PATH", "IDF_TOOLS_PATH"):
             if " " in p[k]:
-                die(f"{k} có dấu cách ({p[k]}) — ESP-IDF trên Windows không hỗ trợ; đặt {k} khác trong config/project.env")
+                die(f"{k} contains a space ({p[k]}) — ESP-IDF on Windows does not support this; set another {k} in config/project.env")
 
 
 _IDF_ENV = None
@@ -481,7 +481,7 @@ def idf_env(p):
         _IDF_ENV = dict(os.environ)
         return _IDF_ENV
     if not (idf_path / "tools" / "idf.py").is_file():
-        die(f"không thấy ESP-IDF tại {idf_path} — chạy: tm idf")
+        die(f"ESP-IDF not found at {idf_path} — run: tm idf")
     env = dict(os.environ, IDF_PATH=str(idf_path), IDF_TOOLS_PATH=p["IDF_TOOLS_PATH"])
     dump = "import os,json;print(json.dumps(dict(os.environ)))"
     if WINDOWS:
@@ -493,7 +493,7 @@ def idf_env(p):
     try:
         _IDF_ENV = json.loads(r.stdout.strip().splitlines()[-1])
     except (IndexError, ValueError):
-        die("export ESP-IDF lỗi — chạy lại: tm idf")
+        die("exporting the ESP-IDF environment failed — run again: tm idf")
     return _IDF_ENV
 
 
@@ -505,7 +505,7 @@ def idf_python(env):
             return str(exe)
     exe = shutil.which("python", path=env.get("PATH"))
     if not exe:
-        die("không tìm thấy python của ESP-IDF — chạy lại: tm idf")
+        die("ESP-IDF python not found — run again: tm idf")
     return exe
 
 
@@ -514,7 +514,7 @@ def run(cmd, **kw):
     try:
         r = subprocess.run(cmd, **kw)
     except FileNotFoundError:
-        die(f"không chạy được: {cmd[0]}")
+        die(f"cannot run: {cmd[0]}")
     if r.returncode:
         raise Die(r.returncode)
 
@@ -535,7 +535,7 @@ def command(name, help_):
     return deco
 
 
-@command("doctor", "Kiểm tra môi trường (không thay đổi gì)")
+@command("doctor", "Check the environment (changes nothing)")
 def cmd_doctor(args):
     p = project()
     missing = 0
@@ -549,7 +549,7 @@ def cmd_doctor(args):
             missing += counts
         return cond
 
-    info(f"Hệ thống ({'Windows' if WINDOWS else 'macOS' if MACOS else 'Linux'})")
+    info(f"System ({'Windows' if WINDOWS else 'macOS' if MACOS else 'Linux'})")
     need(shutil.which("git"), "git", "git (Windows: winget install Git.Git)")
     need(sys.version_info >= (3, 8), f"python {sys.version.split()[0]}", "python >= 3.8")
     if not WINDOWS:
@@ -567,74 +567,74 @@ def cmd_doctor(args):
     while not base.exists() and base.parent != base:
         base = base.parent
     free_gb = shutil.disk_usage(base).free // 2 ** 30
-    need(free_gb >= 4, f"dung lượng trống {free_gb} GB ({base})", f"dung lượng trống {free_gb} GB (< 4 GB) tại {base}")
+    need(free_gb >= 4, f"free disk space {free_gb} GB ({base})", f"free disk space {free_gb} GB (< 4 GB) at {base}")
 
     info(f"ESP-IDF {p['IDF_VERSION']} ({p['IDF_PATH']})")
     if WINDOWS:
         for k in ("IDF_PATH", "IDF_TOOLS_PATH"):
-            need(" " not in p[k], f"{k} không có dấu cách", f"{k} có dấu cách — đổi trong config/project.env")
+            need(" " not in p[k], f"{k} has no spaces", f"{k} contains a space — change it in config/project.env")
     tools = Path(p["IDF_TOOLS_PATH"])
-    if need((Path(p["IDF_PATH"]) / "tools" / "idf.py").is_file(), "source", "chưa có (tm idf)"):
+    if need((Path(p["IDF_PATH"]) / "tools" / "idf.py").is_file(), "source", "missing (tm idf)"):
         gcc = "xtensa-esp32-elf-gcc" + (".exe" if WINDOWS else "")
         need(glob.glob(str(tools / "tools" / "xtensa-esp-elf" / "*" / "xtensa-esp-elf" / "bin" / gcc)),
-             "toolchain xtensa-esp32", "toolchain chưa cài (tm idf)")
+             "toolchain xtensa-esp32", "toolchain not installed (tm idf)")
         need(glob.glob(str(tools / "python_env" / f"{_idf_series(p['IDF_VERSION'])}_py*_env")),
-             "python env", "python env chưa tạo (tm idf)")
+             "python env", "python env not created (tm idf)")
 
-    info("Cấu hình")
-    need(SECRETS_FILE.is_file(), f"form {SECRETS_FILE}", "form chưa có (tm secrets)", counts=False)
+    info("Configuration")
+    need(SECRETS_FILE.is_file(), f"form {SECRETS_FILE}", "form missing (tm secrets)", counts=False)
     need((Path(p["FW_DIR"]) / "sdkconfig.secrets").is_file(), "sdkconfig.secrets",
-         "sdkconfig.secrets chưa sinh (tm config) — build vẫn được nhưng firmware không kết nối", counts=False)
+         "sdkconfig.secrets not generated (tm config) — the build works but the firmware will not connect", counts=False)
 
-    info("Chạy (không cần để build)")
+    info("Run (not needed to build)")
     need(_wg_tool(), "WireGuard", "WireGuard " + ("for Windows (winget install WireGuard.WireGuard)"
                                                 if WINDOWS else "tools (make deps)"), counts=False)
     if not WINDOWS and not MACOS:
         r = subprocess.run(["id", "-nG"], capture_output=True, text=True)
-        need("dialout" in r.stdout.split(), "user thuộc nhóm dialout",
-             "user chưa thuộc nhóm dialout: sudo usermod -aG dialout $USER", counts=False)
+        need("dialout" in r.stdout.split(), "user is in the dialout group",
+             "user is not in the dialout group: sudo usermod -aG dialout $USER", counts=False)
     s = load_secrets(required=False)
     port = serial_port(s)
     ports = {pp for pp, _ in usb_serial_ports()}
     if port:
         present = port in ports or (not WINDOWS and Path(port).exists())
-        need(present, f"serial {port}", f"không thấy {port} (chưa cắm board / thiếu driver?)", counts=False)
+        need(present, f"serial {port}", f"{port} not found (board unplugged / driver missing?)", counts=False)
     else:
-        need(False, "", "không thấy board USB-serial (chưa cắm / thiếu driver CH340/CP210x?)", counts=False)
+        need(False, "", "no USB-serial board found (unplugged / CH340/CP210x driver missing?)", counts=False)
 
     print()
     if missing:
-        info(f"thiếu {missing} mục để build — xem ✘ ở trên")
+        info(f"{missing} item(s) missing to build — see ✘ above")
         raise Die(1)
-    info("đủ điều kiện build")
+    info("ready to build")
 
 
-@command("deps", "Cài gói hệ thống cần thiết (Linux: apt + sudo; Windows: hướng dẫn)")
+@command("deps", "Install required system packages (Linux: apt + sudo; Windows: instructions)")
 def cmd_deps(args):
     if WINDOWS:
-        info("Windows không cần gói hệ thống riêng: `tm idf` tự tải cmake, ninja, toolchain.")
-        print("    Cần có sẵn: Git (winget install Git.Git), Python 3.8+ (winget install Python.Python.3.12)")
-        print("    Driver USB-UART của board: CH340 (WCH CH341SER) hoặc CP210x (Silicon Labs)")
-        print("    Để chạy peer/bench: WireGuard for Windows (winget install WireGuard.WireGuard)")
+        info("Windows needs no extra system packages: `tm idf` downloads cmake, ninja and the toolchain.")
+        print("    Prerequisites: Git (winget install Git.Git), Python 3.8+ (winget install Python.Python.3.12)")
+        print("    Board USB-UART driver: CH340 (WCH CH341SER) or CP210x (Silicon Labs)")
+        print("    For peer/bench: WireGuard for Windows (winget install WireGuard.WireGuard)")
         return
     run(["bash", ROOT / "scripts" / "install-deps.sh"])
 
 
-@command("idf", "Clone + cài ESP-IDF và toolchain esp32")
+@command("idf", "Clone and install ESP-IDF and the esp32 toolchain")
 def cmd_idf(args):
     p = project()
     check_idf_paths(p)
     idf_path = Path(p["IDF_PATH"])
     if not shutil.which("git"):
-        die("chưa có git")
+        die("git is not installed")
     if not (idf_path / "tools" / "idf.py").is_file():
         info(f"clone ESP-IDF {p['IDF_VERSION']} → {idf_path} (~650 MB)")
         idf_path.parent.mkdir(parents=True, exist_ok=True)
         run(["git", "clone", "--depth", "1", "--branch", p["IDF_VERSION"], "--recurse-submodules",
              "--shallow-submodules", "https://github.com/espressif/esp-idf.git", idf_path])
     else:
-        ok(f"đã có ESP-IDF tại {idf_path}")
-    info(f"install {p['IDF_TARGET']} (toolchain ~1.5 GB vào {p['IDF_TOOLS_PATH']})")
+        ok(f"ESP-IDF already present at {idf_path}")
+    info(f"install {p['IDF_TARGET']} (toolchain ~1.5 GB into {p['IDF_TOOLS_PATH']})")
     env = dict(os.environ, IDF_PATH=str(idf_path), IDF_TOOLS_PATH=p["IDF_TOOLS_PATH"])
     try:
         if WINDOWS:
@@ -643,33 +643,33 @@ def cmd_idf(args):
             run([idf_path / "install.sh", p["IDF_TARGET"]], env=env, cwd=idf_path)
     except Die:
         if not os.environ.get("IDF_GITHUB_ASSETS"):
-            info("nếu lỗi là CERTIFICATE_VERIFY_FAILED khi tải từ github.com, tải qua mirror của Espressif:")
+            info("if the error is CERTIFICATE_VERIFY_FAILED while downloading from github.com, use the Espressif mirror:")
             print("    Windows:      $env:IDF_GITHUB_ASSETS='dl.espressif.com/github_assets'; .\\tm idf")
             print("    Linux/macOS:  IDF_GITHUB_ASSETS=dl.espressif.com/github_assets make idf")
         raise
-    ok("xong. Kiểm tra: tm doctor")
+    ok("done. Check with: tm doctor")
 
 
-@command("secrets", "Tạo form secrets/secrets.env (không ghi đè)")
+@command("secrets", "Create the secrets/secrets.env form (never overwrites)")
 def cmd_secrets(args):
     if SECRETS_FILE.is_file():
-        info(f"đã có {SECRETS_FILE} (giữ nguyên). Sửa file đó rồi chạy: tm config")
+        info(f"{SECRETS_FILE} already exists (kept). Edit it, then run: tm config")
         return
     _write_private(SECRETS_FILE, SECRETS_FORM.read_text(encoding="utf-8"))
     if not WINDOWS:
         os.chmod(SECRETS_DIR, 0o700)
-    info(f"đã tạo form: {SECRETS_FILE}")
-    print("    Điền ít nhất WIFI_SSID / WIFI_PASSWORD, sau đó chạy: tm config")
+    info(f"created form: {SECRETS_FILE}")
+    print("    Fill in at least WIFI_SSID / WIFI_PASSWORD, then run: tm config")
 
 
-@command("config", "Kiểm tra form, sinh khóa + cấu hình peer + sdkconfig.secrets")
+@command("config", "Validate the form; generate keys, peer config and sdkconfig.secrets")
 def cmd_config(args):
     s = load_secrets()
-    info(f"kiểm tra {SECRETS_FILE}")
+    info(f"checking {SECRETS_FILE}")
     ts_dir = ROOT / FW_PHASE3
     endpoint = gen_config(s, SECRETS_DIR, ROOT / FW_PHASE2, ts_dir if ts_dir.is_dir() else None)
     print(f"\n  Peer {s['LINUX_TUNNEL_IP']}  ←UDP {endpoint}:{s['WG_PORT']}→  ESP32 {s['ESP_TUNNEL_IP']}")
-    print("  Tiếp theo:  tm build   (và  tm peer-up  khi có board)")
+    print("  Next:  tm build   (and  tm peer-up  once a board is connected)")
 
 
 SDKCONFIG_STAMP = "build/.sdkconfig-inputs.sha"
@@ -692,7 +692,7 @@ def _refresh_sdkconfig(fw, profile=""):
             h.update(f.read_bytes())
     stamp = fw / SDKCONFIG_STAMP
     if (fw / "sdkconfig").is_file() and (not stamp.is_file() or stamp.read_text().strip() != h.hexdigest()):
-        info("sdkconfig.defaults/secrets đã đổi → tạo lại sdkconfig (thay đổi menuconfig cũ sẽ mất)")
+        info("sdkconfig.defaults/secrets changed → regenerating sdkconfig (earlier menuconfig changes are lost)")
         (fw / "sdkconfig").unlink()
     build = fw / "build"
     if build.is_dir() and not (build / "CMakeCache.txt").exists() and \
@@ -701,7 +701,7 @@ def _refresh_sdkconfig(fw, profile=""):
     return h.hexdigest()
 
 
-@command("build", "Build firmware (--prod: bản dùng thật, không test hook, nếu firmware có sdkconfig.prod.defaults)")
+@command("build", "Build the firmware (--prod: production build without test hooks, if the firmware has sdkconfig.prod.defaults)")
 def cmd_build(args):
     ap = argparse.ArgumentParser(prog="tm build")
     ap.add_argument("--prod", action="store_true")
@@ -711,11 +711,11 @@ def cmd_build(args):
     profile = ""
     if a.prod:
         if not (fw / "sdkconfig.prod.defaults").is_file():
-            die(f"{p['FW_PROJECT']} không có sdkconfig.prod.defaults")
+            die(f"{p['FW_PROJECT']} has no sdkconfig.prod.defaults")
         profile = "prod"
-        info("profile prod: test hook tắt, log WARN (sdkconfig.prod.defaults)")
+        info("profile prod: test hooks off, log level WARN (sdkconfig.prod.defaults)")
     if not (fw / "sdkconfig.secrets").is_file():
-        info("CẢNH BÁO: chưa có sdkconfig.secrets (tm config) — firmware sẽ không kết nối Wi-Fi/WireGuard")
+        info("WARNING: no sdkconfig.secrets (tm config) — the firmware will not connect to Wi-Fi/WireGuard")
     idf_env(p)["TM_PROFILE"] = profile   # read by the firmware's CMakeLists.txt
     digest = _refresh_sdkconfig(fw, profile)
     if not (fw / "sdkconfig").is_file():
@@ -725,7 +725,7 @@ def cmd_build(args):
     idf(p, "build")
 
 
-@command("size", "Báo cáo Flash/RAM tĩnh → results/")
+@command("size", "Static flash/RAM report → results/")
 def cmd_size(args):
     p = project()
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -740,32 +740,32 @@ def cmd_size(args):
         (RESULTS_DIR / out).write_text(r.stdout, encoding="utf-8")
         if echo:
             print(r.stdout, end="")
-    ok("lưu: results/size.txt, results/size-components.txt")
+    ok("saved: results/size.txt, results/size-components.txt")
 
 
 def _port_args():
     s = load_secrets(required=False)
     port = serial_port(s)
     if not port:
-        info("không thấy board USB-serial — để idf.py tự dò cổng")
+        info("no USB-serial board found — letting idf.py detect the port")
         return ["-b", s["FLASH_BAUD"]]
-    info(f"cổng: {port}")
+    info(f"port: {port}")
     return ["-p", port, "-b", s["FLASH_BAUD"]]
 
 
-@command("flash", "Nạp firmware (SERIAL_PORT trong form, trống = tự dò)")
+@command("flash", "Flash the firmware (SERIAL_PORT from the form, empty = auto-detect)")
 def cmd_flash(args):
     p = project()
     idf(p, *_port_args(), "flash")
 
 
-@command("monitor", "Mở serial monitor (Ctrl+] để thoát)")
+@command("monitor", "Open the serial monitor (Ctrl+] to exit)")
 def cmd_monitor(args):
     p = project()
     idf(p, *_port_args(), "monitor")
 
 
-@command("flash-monitor", "Nạp rồi mở monitor")
+@command("flash-monitor", "Flash, then open the monitor")
 def cmd_flash_monitor(args):
     p = project()
     idf(p, *_port_args(), "flash", "monitor")
@@ -781,7 +781,7 @@ def cmd_clean(args):
     idf(project(), "clean")
 
 
-@command("fullclean", "Xóa build + sdkconfig")
+@command("fullclean", "Remove build/ and sdkconfig")
 def cmd_fullclean(args):
     p = project()
     idf(p, "fullclean")
@@ -789,13 +789,13 @@ def cmd_fullclean(args):
         (Path(p["FW_DIR"]) / f).unlink(missing_ok=True)
 
 
-@command("docker-build", "Build bằng image espressif/idf (chỉ cần Docker)")
+@command("docker-build", "Build with the espressif/idf image (needs only Docker)")
 def cmd_docker_build(args):
     p = project()
     if not shutil.which("docker"):
-        die("chưa cài docker")
+        die("docker is not installed")
     if not (Path(p["FW_DIR"]) / "sdkconfig.secrets").is_file():
-        info("CẢNH BÁO: chưa có sdkconfig.secrets (tm config)")
+        info("WARNING: no sdkconfig.secrets (tm config)")
     info(f"espressif/idf:{p['IDF_VERSION']}  →  {p['FW_PROJECT']}/build")
     user = [] if WINDOWS else ["-u", f"{os.getuid()}:{os.getgid()}"]
     run(["docker", "run", "--rm", *user, "-e", "HOME=/tmp", "-v", f"{p['FW_DIR']}:/project", "-w", "/project",
@@ -826,7 +826,7 @@ def _win_admin():
 def _peer(action):
     conf = SECRETS_DIR / f"{TUNNEL}.conf"
     if not conf.is_file():
-        die(f"chưa có {conf} — chạy: tm config")
+        die(f"{conf} not found — run: tm config")
     if not WINDOWS:
         if action == "status":
             run(["sudo", "wg", "show", TUNNEL])
@@ -835,9 +835,9 @@ def _peer(action):
         return
     wg_exe = _WG_WIN_DIR / "wireguard.exe"
     if not wg_exe.is_file():
-        die("chưa cài WireGuard for Windows: winget install WireGuard.WireGuard")
+        die("WireGuard for Windows is not installed: winget install WireGuard.WireGuard")
     if not _win_admin():
-        die("cần quyền admin: mở PowerShell bằng 'Run as administrator' rồi chạy lại")
+        die("administrator rights required: open PowerShell with 'Run as administrator' and run again")
     if action == "status":
         run([_WG_WIN_DIR / "wg.exe", "show", TUNNEL])
         return
@@ -847,18 +847,18 @@ def _peer(action):
         run([wg_exe, "/installtunnelservice", conf])
         run(["netsh", "advfirewall", "firewall", "add", "rule", f"name={FW_RULE}", "dir=in", "action=allow",
              "protocol=UDP", f"localport={port}"], stdout=subprocess.DEVNULL)
-        ok(f"tunnel {TUNNEL} đang chạy; firewall mở UDP {port} (rule {FW_RULE})")
+        ok(f"tunnel {TUNNEL} is running; firewall allows UDP {port} (rule {FW_RULE})")
     else:
         run([wg_exe, "/uninstalltunnelservice", TUNNEL])
-        ok(f"đã tắt tunnel {TUNNEL} và xóa rule firewall {FW_RULE}")
+        ok(f"stopped tunnel {TUNNEL} and removed firewall rule {FW_RULE}")
 
 
-@command("peer-up", "Bật WireGuard peer trên máy này (Linux: sudo; Windows: admin)")
+@command("peer-up", "Start the WireGuard peer on this host (Linux: sudo; Windows: administrator)")
 def cmd_peer_up(args):
     _peer("up")
 
 
-@command("peer-down", "Tắt WireGuard peer")
+@command("peer-down", "Stop the WireGuard peer")
 def cmd_peer_down(args):
     _peer("down")
 
@@ -877,16 +877,16 @@ def _python_with_pyserial():
         return idf_python(idf_env(project()))
 
 
-@command("log", "Reset board và ghi log → results/serial.log")
+@command("log", "Reset the board and capture its log → results/serial.log")
 def cmd_log(args):
     port = serial_port()
     if not port:
-        die("không thấy board USB-serial — đặt SERIAL_PORT trong secrets/secrets.env")
+        die("no USB-serial board found — set SERIAL_PORT in secrets/secrets.env")
     run([_python_with_pyserial(), BENCH_DIR / "serial_capture.py", "--port", port, "--reset",
          "--out", RESULTS_DIR / "serial.log", *args.rest])
 
 
-@command("bench", "Chạy bộ đo qua tunnel (--host <ip> để đo baseline LAN, --label ...)")
+@command("bench", "Run the benchmarks over the tunnel (--host <ip> for a LAN baseline, --label ...)")
 def cmd_bench(args):
     ap = argparse.ArgumentParser(prog="tm bench")
     ap.add_argument("--host")
@@ -899,7 +899,7 @@ def cmd_bench(args):
          "--out", RESULTS_DIR / "bench.jsonl", *rest])
 
 
-@command("metrics", "Tóm tắt results/serial.log → results/periodic.csv")
+@command("metrics", "Summarize results/serial.log → results/periodic.csv")
 def cmd_metrics(args):
     run([sys.executable, BENCH_DIR / "parse_metrics.py", RESULTS_DIR / "serial.log",
          "--csv", RESULTS_DIR / "periodic.csv", *args.rest])
@@ -920,11 +920,11 @@ def build_fuzz_driver(out_exe):
     """Build firmware/phase3-tailscale/test/fuzz (driver + JSON pruner + cJSON from ESP-IDF)."""
     cc, path = host_cc()
     if not cc:
-        die("không có trình biên dịch C cho host (gcc / clang); Windows: cài MSYS2 MinGW")
+        die("no host C compiler (gcc / clang); on Windows install MSYS2 MinGW")
     p = project()
     cjson = Path(p["IDF_PATH"]) / "components" / "json" / "cJSON"
     if not (cjson / "cJSON.c").is_file():
-        die(f"không thấy cJSON tại {cjson} — chạy: tm idf")
+        die(f"cJSON not found at {cjson} — run: tm idf")
     fz = ROOT / FW_PHASE3 / "test" / "fuzz"
     ml = ROOT / FW_PHASE3 / "components" / "microlink"
     run([cc, "-std=c99", "-O2", "-g", "-Wall", "-Wextra", "-Werror", "-DFUZZ_GUARDED_ALLOC",
@@ -934,7 +934,7 @@ def build_fuzz_driver(out_exe):
     return path
 
 
-@command("fuzz", "Fuzz bộ cắt JSON của MicroLink trên host (--seconds N, --seed S)")
+@command("fuzz", "Fuzz the MicroLink JSON pruner on the host (--seconds N, --seed S)")
 def cmd_fuzz(args):
     ap = argparse.ArgumentParser(prog="tm fuzz")
     ap.add_argument("--seconds", type=float, default=60)
@@ -945,17 +945,17 @@ def cmd_fuzz(args):
     exe = out / ("fuzz_json_prune.exe" if WINDOWS else "fuzz_json_prune")
     path = build_fuzz_driver(exe)
     corpus = sorted((ROOT / FW_PHASE3 / "test" / "fuzz" / "corpus").glob("*"))
-    info(f"fuzz {a.seconds:g} s; input gây lỗi được lưu ở {out}")
+    info(f"fuzz {a.seconds:g} s; failing inputs are saved to {out}")
     run([exe, "-t", str(a.seconds), "-s", str(a.seed), *corpus], cwd=out, env=dict(os.environ, PATH=path))
 
 
-@command("test", "Unit test cho tooling (không cần board / ESP-IDF)")
+@command("test", "Unit tests for the tooling (no board / ESP-IDF needed)")
 def cmd_test(args):
     run([sys.executable, "-m", "unittest", "discover", "-s", ROOT / "tests", "-v", *args.rest],
         cwd=ROOT)
 
 
-@command("help", "Danh sách lệnh")
+@command("help", "List the commands")
 def cmd_help(args):
     print(__doc__.strip().split("\n\n")[0])
     for name, (_, h) in COMMANDS.items():
@@ -972,7 +972,7 @@ def main(argv=None):
         name = "help"
     if name not in COMMANDS:
         cmd_help(None)
-        die(f"không rõ lệnh: {name}")
+        die(f"unknown command: {name}")
     try:
         COMMANDS[name][0](argparse.Namespace(rest=argv))
     except KeyboardInterrupt:
