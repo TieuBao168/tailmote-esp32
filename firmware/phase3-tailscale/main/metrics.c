@@ -11,6 +11,8 @@
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
+#include "ml_filter.h"
+#include "lwip/stats.h"
 
 #define MAX_TASKS 32
 
@@ -85,6 +87,25 @@ static void report_cpu_and_heap(bool with_tasks)
            metrics_ms(), h.free_internal, h.largest_internal,
            (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
            load[0], portNUM_PROCESSORS > 1 ? load[1] : 0.0f, (unsigned)n);
+
+    /* Inbound tunnel packets seen by MicroLink's packet filter: shows whether
+     * peers' traffic reaches the board at all and whether the policy drops it
+     * (e.g. exit-node traffic with no matching rule). Cumulative counters. */
+    ml_filter_stats_t fs;
+    ml_filter_get_stats(&fs);
+    printf("METRIC {\"ev\":\"filter\",\"t_ms\":%" PRIu32 ",\"accepted\":%" PRIu32 ",\"dropped\":%" PRIu32
+           ",\"rules\":%" PRIu32 ",\"configured\":%d}\n",
+           metrics_ms(), fs.accepted, fs.dropped, fs.rules, fs.configured ? 1 : 0);
+#if LWIP_STATS
+    /* lwIP IPv4 counters (CONFIG_LWIP_STATS, diagnostic builds): fw counts
+     * packets forwarded between the tunnel and Wi-Fi in either direction,
+     * rterr packets with no route, drop everything lwIP discarded. */
+    printf("METRIC {\"ev\":\"ip\",\"t_ms\":%" PRIu32 ",\"recv\":%u,\"xmit\":%u,\"fw\":%u,\"drop\":%u"
+           ",\"rterr\":%u,\"memerr\":%u,\"proterr\":%u}\n",
+           metrics_ms(), (unsigned)lwip_stats.ip.recv, (unsigned)lwip_stats.ip.xmit,
+           (unsigned)lwip_stats.ip.fw, (unsigned)lwip_stats.ip.drop, (unsigned)lwip_stats.ip.rterr,
+           (unsigned)lwip_stats.ip.memerr, (unsigned)lwip_stats.ip.proterr);
+#endif
 
     if (with_tasks) {
         for (UBaseType_t i = 0; i < n; i++) {
