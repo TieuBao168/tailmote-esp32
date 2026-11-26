@@ -234,6 +234,11 @@ Những điều cần biết:
 - **Bảng NAT giới hạn 128 luồng** (`IP_NAPT_MAX`, khoảng 4 KB heap) để vừa board không
   PSRAM. Khi bảng đầy, luồng cũ nhất bị xoá, nên một kết nối để lâu không dùng có thể
   bị đứt.
+- **Bản exit node dùng hàng đợi nhận nhỏ hơn** (bộ đệm RX/TX động của Wi-Fi là 16
+  thay vì 32, mailbox của tcpip là 16 thay vì 64). Gói tải về đến qua Wi-Fi nhanh hơn
+  nhiều so với tốc độ đi ra qua tunnel, nhất là khi phải đi qua DERP. Với hàng đợi mặc
+  định, các gói dồn lại đã chiếm hết heap chỉ trong vài giây. Giờ gói thừa bị bỏ đi, và
+  TCP trên điện thoại tự giảm tốc độ cho vừa.
 - **Theo dõi heap.** Chuyển tiếp gói tốn thêm bộ đệm, cộng vào tải bình thường của
   node. Nếu `heap_min` trong các dòng `METRIC` xuống dưới khoảng 10 KB, hãy giảm
   traffic qua board hoặc tắt exit node.

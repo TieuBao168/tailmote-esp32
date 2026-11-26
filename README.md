@@ -235,6 +235,11 @@ What to expect:
 - **The NAPT table is capped at 128 flows** (`IP_NAPT_MAX`, ~4 KB of heap) so that it
   fits this no-PSRAM board. When it is full, the oldest flow is evicted, which can break
   a long-idle connection.
+- **Receive queues are smaller in exit-node builds** (Wi-Fi dynamic RX/TX buffers
+  16 instead of 32, tcpip mailbox 16 instead of 64). Downloads arrive over Wi-Fi much
+  faster than they can leave through the tunnel, especially over DERP. With the default
+  queues, the backlog used up the whole heap within seconds. Now excess packets are
+  dropped, and TCP on the phone slows down to match.
 - **Watch the heap.** Forwarding adds packet buffers on top of the node's usual load.
   If `heap_min` in the `METRIC` lines drops below ~10 KB, use the board for less
   traffic or turn the exit node off.

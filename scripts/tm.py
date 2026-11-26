@@ -326,6 +326,15 @@ def gen_ts_config(s, fw_dir):
             "CONFIG_ML_SUBNET_ROUTER=y",
             f"CONFIG_ML_ADVERTISE_ROUTES={kconfig_str(','.join(routes))}",
             "# CONFIG_ML_ROUTER_IPV6 is not set",
+            # Forwarded traffic arrives over Wi-Fi far faster than it can
+            # leave through the tunnel (often a DERP TLS stream), and with 32
+            # RX buffers (~1.7 KB each) + a 64-packet tcpip mailbox the backlog
+            # outgrew the heap on the board (1171 failed allocations within
+            # seconds). Smaller queues drop the excess instead, and TCP on the
+            # peer backs off to the tunnel's pace.
+            "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16",
+            "CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16",
+            "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16",
         ]
     _write_private(fw_dir / "sdkconfig.secrets", "\n".join(sdk) + "\n")
     ok(f"firmware Phase 3: {fw_dir / 'sdkconfig.secrets'}"
