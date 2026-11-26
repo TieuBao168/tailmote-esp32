@@ -161,6 +161,27 @@ class GenConfig(unittest.TestCase):
             self.assertNotIn("CONFIG_ML_DERP_REGION", sdk)
             tm.gen_config(dict(s, TS_DERP_REGION="3"), d / "s", d / "fw2", d / "fw3")
             self.assertIn("CONFIG_ML_DERP_REGION=3\n", (d / "fw3" / "sdkconfig.secrets").read_text())
+            self.assertNotIn("CONFIG_ML_SUBNET_ROUTER", sdk)
+
+            # Exit node + subnet routes: forwarding on, routes in order, NAT66 off.
+            tm.gen_config(dict(s, TS_EXIT_NODE="y", TS_SUBNET_ROUTES="192.168.1.7/24, 10.0.0.0/8"),
+                          d / "s", d / "fw2", d / "fw3")
+            sdk = (d / "fw3" / "sdkconfig.secrets").read_text()
+            self.assertIn("CONFIG_ML_SUBNET_ROUTER=y\n", sdk)
+            self.assertIn('CONFIG_ML_ADVERTISE_ROUTES="0.0.0.0/0,192.168.1.0/24,10.0.0.0/8"\n', sdk)
+            self.assertIn("# CONFIG_ML_ROUTER_IPV6 is not set\n", sdk)
+
+    def test_ts_routes(self):
+        base = dict(tm.SECRET_DEFAULTS, WIFI_SSID="lab")
+        self.assertEqual(tm.ts_routes(base), [])
+        self.assertEqual(tm.ts_routes(dict(base, TS_EXIT_NODE="y")), ["0.0.0.0/0"])
+        self.assertEqual(tm.ts_routes(dict(base, TS_SUBNET_ROUTES="192.168.1.0/24 192.168.1.9/24")),
+                         ["192.168.1.0/24"])
+        for k, v in [("TS_EXIT_NODE", "yes"), ("TS_SUBNET_ROUTES", "192.168.1.0/33"),
+                     ("TS_SUBNET_ROUTES", "fd12::/64"), ("TS_SUBNET_ROUTES", "0.0.0.0/0"),
+                     ("TS_SUBNET_ROUTES", ",".join(f"10.{i}.0.0/16" for i in range(9)))]:
+            with self.subTest(k=k, v=v):
+                self.assertTrue(tm.validate_secrets(dict(base, **{k: v})))
 
     def test_ts_validation(self):
         base = dict(tm.SECRET_DEFAULTS, WIFI_SSID="lab")

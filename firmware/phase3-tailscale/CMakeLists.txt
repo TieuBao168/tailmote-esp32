@@ -15,4 +15,9 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.secrets")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# lwIP's NAPT table (exit node / subnet router, CONFIG_ML_SUBNET_ROUTER) is
+# allocated on the heap when forwarding starts: 512 entries by default, ~16 KB,
+# too much for this no-PSRAM board. 128 entries (~4 KB); the oldest entry is
+# evicted when it is full. Unused while forwarding is off.
+idf_build_set_property(COMPILE_DEFINITIONS "IP_NAPT_MAX=128" APPEND)
 project(tailmote_phase3)

@@ -32,6 +32,7 @@ RAM (see the Phase 1 report).
 - [Repository layout](#repository-layout)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Exit node (experimental)](#exit-node-experimental)
 - [Command reference](#command-reference)
 - [Phase 2: WireGuard PoC and benchmarks](#phase-2-wireguard-poc-and-benchmarks)
 - [Testing](#testing)
@@ -206,6 +207,45 @@ make flash-monitor
 Watch the console until MicroLink reports `CONNECTED`. The board then appears in the
 Tailscale admin console, and you can reach it from any tailnet peer at its `100.x.y.z`
 address. Press `Ctrl+]` to leave the monitor.
+
+## Exit node (experimental)
+
+The board can act as a Tailscale **exit node**. A phone or laptop that selects it
+sends its internet traffic through the board, so the traffic leaves with the public IP
+of the board's Wi-Fi network. MicroLink provides the forwarding and NAPT
+(`CONFIG_ML_SUBNET_ROUTER`), and `tm config` turns it on from the secrets form.
+
+1. In `secrets/secrets.env` set `TS_EXIT_NODE='y'`. You can also set `TS_SUBNET_ROUTES`
+   to IPv4 CIDRs such as `'192.168.1.0/24'`, so that peers can reach devices on the
+   board's LAN.
+2. Run `make config`, then build with `python3 scripts/tm.py build --prod`, then run
+   `make flash-monitor`.
+3. Look for `Advertising route 0.0.0.0/0 (exit node)` in the boot log.
+4. In the [admin console](https://login.tailscale.com/admin/machines), open the board,
+   choose **Edit route settings…** and enable **Use as exit node** (and any subnet
+   routes).
+5. On the phone or laptop, open the Tailscale app → **Exit node** → pick the board.
+
+What to expect:
+
+- **Throughput is a few Mbit/s at most.** That is enough for messaging, light browsing
+  and services that need your home IP, but not for video.
+- **Only IPv4 is forwarded.** NAT66 is left off to save RAM, so clients fall back to
+  IPv4.
+- **The NAPT table is capped at 128 flows** (`IP_NAPT_MAX`, ~4 KB of heap) so that it
+  fits this no-PSRAM board. When it is full, the oldest flow is evicted, which can break
+  a long-idle connection.
+- **Watch the heap.** Forwarding adds packet buffers on top of the node's usual load.
+  If `heap_min` in the `METRIC` lines drops below ~10 KB, use the board for less
+  traffic or turn the exit node off.
+- **Peers that use the exit node can also reach the board's LAN**, because traffic is
+  forwarded to any destination. Only share it with devices you trust, and restrict it
+  with ACLs.
+- **If DNS fails while the exit node is on,** set global nameservers (e.g. `1.1.1.1`) in
+  the admin console under **DNS**, with *Override local DNS* enabled. MicroLink does
+  not run Tailscale's DNS proxy for exit-node clients.
+
+To turn it off, set `TS_EXIT_NODE=''`, then run `make config`, build and flash again.
 
 ## Command reference
 

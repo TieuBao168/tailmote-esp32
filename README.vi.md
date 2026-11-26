@@ -32,6 +32,7 @@ Phase 1).
 - [Cấu trúc repo](#cấu-trúc-repo)
 - [Môi trường cần có](#môi-trường-cần-có)
 - [Bắt đầu nhanh](#bắt-đầu-nhanh)
+- [Exit node (thử nghiệm)](#exit-node-thử-nghiệm)
 - [Danh sách lệnh](#danh-sách-lệnh)
 - [Phase 2: WireGuard PoC và đo đạc](#phase-2-wireguard-poc-và-đo-đạc)
 - [Kiểm thử](#kiểm-thử)
@@ -206,6 +207,43 @@ make flash-monitor
 Theo dõi log tới khi MicroLink báo `CONNECTED`. Khi đó board hiện lên trong trang admin
 Tailscale, và mọi peer trong tailnet có thể gọi tới nó qua địa chỉ `100.x.y.z`. Nhấn
 `Ctrl+]` để thoát monitor.
+
+## Exit node (thử nghiệm)
+
+Board có thể làm **exit node** của Tailscale. Điện thoại hay laptop chọn board làm exit
+node sẽ đẩy toàn bộ traffic Internet qua board, nên traffic đi ra Internet với IP công
+cộng của mạng Wi-Fi mà board đang kết nối. Phần chuyển tiếp gói và NAT do MicroLink đảm
+nhận (`CONFIG_ML_SUBNET_ROUTER`), còn `tm config` bật nó lên dựa theo form secrets.
+
+1. Trong `secrets/secrets.env`, đặt `TS_EXIT_NODE='y'`. Nếu muốn các peer vào được thiết
+   bị trong LAN của board, đặt thêm `TS_SUBNET_ROUTES` là các dải IPv4, ví dụ
+   `'192.168.1.0/24'`.
+2. Chạy `make config`, rồi build bằng `python3 scripts/tm.py build --prod`, rồi chạy
+   `make flash-monitor`.
+3. Trong log boot, tìm dòng `Advertising route 0.0.0.0/0 (exit node)`.
+4. Trong [trang admin](https://login.tailscale.com/admin/machines), mở board, chọn
+   **Edit route settings…** và bật **Use as exit node** (cùng các subnet route nếu có).
+5. Trên điện thoại hoặc laptop, mở app Tailscale → **Exit node** → chọn board.
+
+Những điều cần biết:
+
+- **Tốc độ chỉ vài Mbit/s.** Đủ để nhắn tin, đọc web nhẹ, dùng dịch vụ cần IP nhà.
+  Không đủ để xem video.
+- **Chỉ chuyển tiếp IPv4.** NAT66 bị tắt để tiết kiệm RAM, nên client sẽ tự chuyển về
+  dùng IPv4.
+- **Bảng NAT giới hạn 128 luồng** (`IP_NAPT_MAX`, khoảng 4 KB heap) để vừa board không
+  PSRAM. Khi bảng đầy, luồng cũ nhất bị xoá, nên một kết nối để lâu không dùng có thể
+  bị đứt.
+- **Theo dõi heap.** Chuyển tiếp gói tốn thêm bộ đệm, cộng vào tải bình thường của
+  node. Nếu `heap_min` trong các dòng `METRIC` xuống dưới khoảng 10 KB, hãy giảm
+  traffic qua board hoặc tắt exit node.
+- **Peer dùng exit node cũng vào được LAN của board,** vì board chuyển tiếp gói tới mọi
+  địa chỉ. Chỉ cho các thiết bị bạn tin dùng, và giới hạn bằng ACL.
+- **Nếu bật exit node mà không phân giải được tên miền (DNS),** vào trang admin mục
+  **DNS**, đặt nameserver toàn cục (ví dụ `1.1.1.1`) và bật *Override local DNS*.
+  MicroLink không chạy bộ proxy DNS của Tailscale cho client dùng exit node.
+
+Muốn tắt, đặt `TS_EXIT_NODE=''`, rồi chạy lại `make config`, build và flash.
 
 ## Danh sách lệnh
 

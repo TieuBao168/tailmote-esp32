@@ -14,6 +14,7 @@ import argparse
 import base64
 import glob
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -44,7 +45,11 @@ SECRET_DEFAULTS = {
     "ESP_PRIVATE_KEY": "", "LINUX_PRIVATE_KEY": "", "PRESHARED_KEY": "",
     "WG_KEEPALIVE": "25", "WIFI_POWER_SAVE": "none", "SERIAL_PORT": "", "FLASH_BAUD": "460800",
     "TS_AUTH_KEY": "", "TS_DEVICE_NAME": "tailmote-esp32", "TS_DERP_REGION": "",
+    "TS_EXIT_NODE": "", "TS_SUBNET_ROUTES": "",
 }
+
+# MicroLink advertises at most this many IPv4 routes (ML_MAX_ROUTES).
+TS_MAX_ROUTES = 8
 
 # Firmware projects that get a generated sdkconfig.secrets (relative to ROOT).
 FW_PHASE2 = "firmware/phase2-wg-poc"
@@ -265,7 +270,33 @@ def validate_secrets(s):
         errs.append("TS_DERP_REGION must be a DERP region number (e.g. 3 = Singapore) or empty")
     if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", s["TS_DEVICE_NAME"]):
         errs.append("TS_DEVICE_NAME: lowercase letters, digits, '-', at most 63 characters")
+    if s["TS_EXIT_NODE"] not in ("", "y"):
+        errs.append("TS_EXIT_NODE: 'y' or empty")
+    try:
+        ts_routes(s)
+    except ValueError as e:
+        errs.append(f"TS_SUBNET_ROUTES: {e}")
     return errs
+
+
+def ts_routes(s):
+    """Routes the Phase 3 board advertises: 0.0.0.0/0 for an exit node, then
+    TS_SUBNET_ROUTES (IPv4 CIDRs, host bits cleared). Raises ValueError."""
+    routes = ["0.0.0.0/0"] if s["TS_EXIT_NODE"] == "y" else []
+    for tok in re.split(r"[,\s]+", s["TS_SUBNET_ROUTES"].strip()):
+        if not tok:
+            continue
+        try:
+            net = ipaddress.IPv4Network(tok, strict=False)
+        except ValueError:
+            raise ValueError(f"'{tok}' is not an IPv4 CIDR such as 192.168.1.0/24")
+        if net.prefixlen == 0:
+            raise ValueError("use TS_EXIT_NODE='y' instead of 0.0.0.0/0")
+        if str(net) not in routes:
+            routes.append(str(net))
+    if len(routes) > TS_MAX_ROUTES:
+        raise ValueError(f"at most {TS_MAX_ROUTES} routes (exit node included)")
+    return routes
 
 
 def _write_private(path, text):
@@ -287,9 +318,20 @@ def gen_ts_config(s, fw_dir):
     ]
     if s["TS_DERP_REGION"]:
         sdk.append(f"CONFIG_ML_DERP_REGION={int(s['TS_DERP_REGION'])}")
+    routes = ts_routes(s)
+    if routes:
+        # Forwarding + NAPT for the advertised routes. The tunnel is IPv4-only,
+        # so NAT66 stays off (saves RAM; peers fall back to IPv4).
+        sdk += [
+            "CONFIG_ML_SUBNET_ROUTER=y",
+            f"CONFIG_ML_ADVERTISE_ROUTES={kconfig_str(','.join(routes))}",
+            "# CONFIG_ML_ROUTER_IPV6 is not set",
+        ]
     _write_private(fw_dir / "sdkconfig.secrets", "\n".join(sdk) + "\n")
     ok(f"firmware Phase 3: {fw_dir / 'sdkconfig.secrets'}"
        + ("" if s["TS_AUTH_KEY"] else " (no TS_AUTH_KEY: the board will print a login URL)"))
+    if routes:
+        ok(f"advertised routes: {', '.join(routes)} — approve them in the Tailscale admin console")
 
 
 def gen_config(s, secrets_dir, fw_dir, ts_fw_dir=None):
