@@ -1,6 +1,6 @@
 # Phase 2 — WireGuard PoC trên ESP32 DOIT DevKit V1
 
-> **Trạng thái (2026-11-24): PoC xong, test cuối gộp vào Phase 3.** Tunnel WireGuard chạy trên board thật; đã đo RAM, Flash, CPU, stack, thời gian kết nối, recovery khi peer mất, PS min-modem (mục 6). Soak test, đo lại throughput và recovery khi mất Wi‑Fi **không làm ở Phase 2**: firmware Phase 3 thay phần lớn stack (control plane, DERP, TLS), nên các test đó chạy một lần trên firmware cuối (mục 7). Build/run: [README.md](../README.md#setup--build).
+> **Trạng thái (2026-11-24): PoC xong, test cuối gộp vào Phase 3.** Tunnel WireGuard chạy trên board thật; đã đo RAM, Flash, CPU, stack, thời gian kết nối, recovery khi peer mất, PS min-modem (mục 6). Soak test, đo lại throughput và recovery khi mất Wi‑Fi **không làm ở Phase 2**: firmware Phase 3 thay phần lớn stack (control plane, DERP, TLS), nên các test đó chạy một lần trên firmware cuối (mục 7). Build/run: [README.vi.md](../README.vi.md#bắt-đầu-nhanh).
 
 Mục tiêu: chạy WireGuard trên board, nối với một peer Linux, và **thay các số ước lượng [E] trong báo cáo Phase 1 bằng số đo thật**: RAM, Flash, CPU, thời gian kết nối, throughput, latency, packet loss, thời gian phục hồi.
 
@@ -20,7 +20,7 @@ firmware/phase2-wg-poc/        ESP-IDF project (target esp32)
   sdkconfig.defaults           BT tắt, 240 MHz, FreeRTOS stats, tcpip trên core 1
   sdkconfig.secrets            (git-ignored) Wi-Fi + khóa WireGuard
 config/secrets.env.example     form bí mật → make secrets / make config
-scripts/tm.py                  setup, sinh cấu hình, build, peer (Linux: make, Windows: .	m)
+scripts/tm.py                  setup, sinh cấu hình, build, peer (Linux: make, Windows: .\tm)
 tools/bench/wg_bench.py        client đo RTT/loss/throughput (chạy trên máy peer)
 tools/bench/serial_capture.py  ghi log serial có timestamp
 tools/bench/parse_metrics.py   tóm tắt log METRIC → JSON/CSV
@@ -30,7 +30,7 @@ Thư viện WireGuard: [`trombik/esp_wireguard`](https://components.espressif.co
 
 ## 2–4. Môi trường, form bí mật, build
 
-Xem [README.md — Setup & Build](../README.md#setup--build). Trên Windows thay `make <x>` bằng `.	m <x>` (mỗi lệnh một lần). Tóm tắt:
+Xem [README.vi.md — Bắt đầu nhanh](../README.vi.md#bắt-đầu-nhanh). Trên Windows thay `make <x>` bằng `.\tm <x>` (mỗi lệnh một lần). Tóm tắt:
 
 ```bash
 make deps idf secrets
