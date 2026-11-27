@@ -46,6 +46,7 @@ CASES = {
     "S5": "Task stacks keep a safety margin",
     "S6": "CPU load stays low when idle",
     "S7": "Exit-node / tunnel traffic seen by the packet filter",
+    "S8": "DERP relay session stays up (reconnects, drops)",
 }
 
 
@@ -362,6 +363,28 @@ def analyse(rows, th):
                         f"{acc} packet(s) accepted, {drop} dropped by the filter"
                         + (f", {flt[-1].get('rules')} rule(s)" if flt else ", no filter samples"))
 
+    # --- DERP counters (firmware METRIC "derp"; cumulative, reset on boot)
+    dsum = {"tx_shed": 0, "tx_down": 0, "reconnects": 0}
+    prev = None
+    for _, kind, p in rows:
+        if kind == "metric" and p.get("ev") == "boot":
+            prev = None
+        elif kind == "metric" and p.get("ev") == "derp":
+            if prev is not None and p["reconnects"] >= prev["reconnects"]:
+                for k in dsum:
+                    dsum[k] += max(0, p[k] - prev[k])
+            prev = p
+    derp_rows = [ts for ts, kind, p in rows if kind == "metric" and p.get("ev") == "derp"]
+    if len(derp_rows) >= 2:
+        hours = max((derp_rows[-1] - derp_rows[0]).total_seconds() / 3600, 1 / 60)
+        rate = dsum["reconnects"] / hours
+        status = "PASS" if rate <= th.derp_reconnects_per_h else ("WARN" if rate <= 5 * th.derp_reconnects_per_h else "FAIL")
+        r["derp"] = dict(dsum, reconnects_per_h=round(rate, 1))
+        r["cases"]["S8"] = (status, f"{dsum['reconnects']} reconnect(s) ({rate:.1f}/h), "
+                            f"{dsum['tx_down']} packet(s) dropped while down, {dsum['tx_shed']} shed early")
+    else:
+        r["cases"]["S8"] = ("WARN", "no DERP counters (firmware without METRIC \"derp\")")
+
     # --- warnings / errors by tag
     logs = {}
     for _, kind, p in rows:
@@ -378,14 +401,14 @@ def timeline(rows, step_s=60):
     accepted_per_s, alloc_failed)]. accepted_per_s counts tunnel packets the
     packet filter let in (phone -> board, exit-node traffic included)."""
     buckets = {}
-    prev = None
+    prev = prev_derp = None
     for ts, kind, p in rows:
         if kind != "metric":
             continue
         key = ts.replace(second=0, microsecond=0) if step_s == 60 else \
             datetime.fromtimestamp(int(ts.timestamp()) // step_s * step_s)
         b = buckets.setdefault(key, {"cpu0": 0.0, "cpu1": 0.0, "heap": None, "largest": None,
-                                     "acc": 0, "alloc": 0})
+                                     "acc": 0, "alloc": 0, "rec": 0, "shed": 0})
         ev = p.get("ev")
         if ev == "periodic":
             b["cpu0"] = max(b["cpu0"], p.get("cpu0", 0))
@@ -397,11 +420,16 @@ def timeline(rows, step_s=60):
                 b["acc"] += p["accepted"] - prev
             prev = p["accepted"]
         elif ev == "boot":
-            prev = None
+            prev = prev_derp = None
         elif ev == "alloc_failed":
             b["alloc"] += 1
-    return [(k, b["cpu0"], b["cpu1"], b["heap"], b["largest"], b["acc"] / step_s, b["alloc"])
-            for k, b in sorted(buckets.items())]
+        elif ev == "derp":
+            if prev_derp is not None and p["reconnects"] >= prev_derp["reconnects"]:
+                b["rec"] += p["reconnects"] - prev_derp["reconnects"]
+                b["shed"] += max(0, p["tx_shed"] - prev_derp["tx_shed"])
+            prev_derp = p
+    return [(k, b["cpu0"], b["cpu1"], b["heap"], b["largest"], b["acc"] / step_s, b["alloc"],
+             b["rec"], b["shed"]) for k, b in sorted(buckets.items())]
 
 
 def render(r):
@@ -417,11 +445,12 @@ def render(r):
         out.append(f"| {cid} {CASES[cid]} | **{st}** | {det} |")
     if r.get("timeline"):
         out += ["", "## Timeline (per minute)", "",
-                "| Time | CPU0 max % | CPU1 max % | Heap free min | Largest block min | Tunnel pkts/s | alloc_failed |",
-                "|---|---|---|---|---|---|---|"]
+                "| Time | CPU0 max % | CPU1 max % | Heap free min | Largest block min | Tunnel pkts/s "
+                "| alloc_failed | DERP reconnects | Shed early |",
+                "|---|---|---|---|---|---|---|---|---|"]
         out += [f"| {k:%H:%M} | {c0:.1f} | {c1:.1f} | {h if h is not None else '-'} | "
-                f"{lg if lg is not None else '-'} | {acc:.1f} | {al} |"
-                for k, c0, c1, h, lg, acc, al in r["timeline"]]
+                f"{lg if lg is not None else '-'} | {acc:.1f} | {al} | {rec} | {shed} |"
+                for k, c0, c1, h, lg, acc, al, rec, shed in r["timeline"]]
     if r["outages"]:
         out += ["", "## Tailnet outages", "", "| Start | Duration |", "|---|---|"]
         out += [f"| {t:%m-%d %H:%M:%S} | {_fmt_dur(d)} |" for t, d in r["outages"][-20:]]
@@ -484,6 +513,8 @@ def main(argv=None):
     r.add_argument("--max-outage-s", type=float, default=120, help="max single outage, seconds")
     r.add_argument("--stack-min", type=int, default=256, help="min free stack per task, bytes")
     r.add_argument("--cpu-idle", type=float, default=10.0, help="max median core0 load, %%")
+    r.add_argument("--derp-reconnects-per-h", type=float, default=6.0,
+                   help="max DERP reconnects per hour for PASS (5x that is WARN)")
     a = ap.parse_args(argv)
     if a.cmd == "capture":
         capture(a)

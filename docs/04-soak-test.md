@@ -42,6 +42,7 @@ Ngưỡng mặc định có thể đổi bằng tham số của `soak.py report`
 | **S5** | Stack | Mọi task còn ≥ 256 B stack trống (`stack_free_min`) |
 | **S6** | CPU | Trung vị tải core 0 ≤ 10 % (khi gần như rảnh) |
 | **S7** | Traffic qua board | Bộ lọc gói đã nhận policy. Report ghi số gói được cho qua và bị chặn (từ điện thoại khi dùng exit node) |
+| **S8** | Kết nối DERP | Số lần dựng lại kết nối DERP ≤ 6/giờ (WARN nếu ≤ 30/giờ). Report ghi thêm số gói bị bỏ lúc DERP đứt (`tx_down`) và số gói bị bỏ sớm khi hàng đợi gần đầy (`tx_shed`). Cần firmware có dòng `METRIC "derp"` |
 
 Report còn có bảng các lần **mất tailnet** (thời điểm, thời lượng), và các dòng **`W`/`E` gom theo nội dung**, ví dụ `ml_derp: TLS write timeout`. Hai bảng này giúp nhìn ra lỗi lặp lại.
 

@@ -19,7 +19,7 @@ T0 = datetime(2026, 11, 27, 10, 0, 0)
 
 def thresholds(**kw):
     d = dict(heap_min=10240, leak_b_per_h=512, warmup_s=300, availability=99.0,
-             max_outage_s=120, stack_min=256, cpu_idle=10.0)
+             max_outage_s=120, stack_min=256, cpu_idle=10.0, derp_reconnects_per_h=6.0)
     d.update(kw)
     return argparse.Namespace(**d)
 
@@ -30,6 +30,7 @@ class Log:
     def __init__(self):
         self.lines = []
         self.boot_t = 0          # wall second of the current boot
+        self.reconnects = 0      # DERP reconnect counter the next samples report
 
     def at(self, sec, body):
         ts = (T0 + timedelta(seconds=sec)).isoformat(timespec="milliseconds")
@@ -51,6 +52,7 @@ class Log:
             h = int(heap + drift_per_h * (s - start) / 3600)
             self.metric(s, "periodic", heap=h, largest=24576, heap_min=30000, cpu0=2.5, cpu1=1.0)
             self.metric(s, "filter", accepted=(s - start) // 10, dropped=0, rules=2, configured=1)
+            self.metric(s, "derp", tx_shed=0, tx_down=0, reconnects=self.reconnects)
             if (s - start) % 60 == 0:
                 self.metric(s, "task", name="ml_coord", stack_free_min=2064, core=1)
 
@@ -66,7 +68,7 @@ class SoakReport(unittest.TestCase):
         log.boot(0)
         log.run(0, 4 * 3600)
         r = soak.analyse(log.rows(), thresholds())
-        for cid in ("S1", "S2", "S3", "S4", "S5", "S6", "S7"):
+        for cid in ("S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"):
             self.assertEqual(r["cases"][cid][0], "PASS", (cid, r["cases"][cid]))
         self.assertIn("# Soak report — PASS", soak.render(r))
 
@@ -128,7 +130,7 @@ class SoakReport(unittest.TestCase):
         tl = soak.timeline(log.rows())
         full = [row for row in tl if row[0].minute in (2, 3, 4)]
         self.assertTrue(full)
-        for _, c0, _, heap, _, acc, alloc in full:
+        for _, c0, _, heap, _, acc, alloc, _, _ in full:
             self.assertAlmostEqual(acc, 0.1, places=2)   # 6 packets / 60 s
             self.assertEqual(alloc, 0)
             self.assertEqual(c0, 2.5)
@@ -143,6 +145,17 @@ class SoakReport(unittest.TestCase):
         self.assertEqual(r["cases"]["S3"][0], "WARN")
         self.assertIn("not graded", r["cases"]["S3"][1])
         self.assertIn("unknown (no boot", soak.render(r))
+
+    def test_derp_reconnect_rate_grades_s8(self):
+        log = Log()
+        log.boot(0)
+        log.reconnects = 0
+        log.run(0, 1800)
+        log.reconnects = 40                       # 40 reconnects in ~half an hour
+        log.run(1800, 3600, state_at=1)
+        r = soak.analyse(log.rows(), thresholds())
+        self.assertEqual(r["cases"]["S8"][0], "FAIL")
+        self.assertEqual(r["derp"]["reconnects"], 40)
 
     def test_warnings_grouped_by_message(self):
         log = Log()
