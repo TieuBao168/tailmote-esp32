@@ -364,8 +364,9 @@ and the results are in [docs/02](docs/02-phase2-wireguard-poc.md).
 - **Pre-authentication parsing was audited by hand** ([docs/03 §10.2](docs/03-phase3-microlink-audit.md#102-rà-soát-tay-phần-nhận-trước-khi-xác-thực)).
   No memory-safety bugs were found. An on-path attacker can force a reconnect by
   desynchronizing the receive nonce, but cannot read or modify data.
-- **Test hooks** (`CONFIG_TM_TEST_HOOKS`, e.g. `WIFI_DOWN <s>`) are enabled in the
-  default build and disabled by `--prod`. Do not deploy a non-`--prod` image.
+- **Test hooks** (`CONFIG_TM_TEST_HOOKS`, e.g. `WIFI_DOWN <s>`) and the UDP echo/sink
+  test service (`CONFIG_TM_ECHO_SERVICE`, ~11 KB of heap) are enabled in the default
+  build and disabled by `--prod`. Do not deploy a non-`--prod` image.
 - Never commit anything from `secrets/` or any `sdkconfig.secrets` file. Both are
   git-ignored.
 

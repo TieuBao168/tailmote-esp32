@@ -360,8 +360,9 @@ không qua tunnel. Ma trận đo (M1–M13), các kịch bản phục hồi và 
   ([docs/03 mục 10.2](docs/03-phase3-microlink-audit.md#102-rà-soát-tay-phần-nhận-trước-khi-xác-thực)).
   Không thấy lỗi an toàn bộ nhớ. Kẻ tấn công trên đường truyền có thể làm lệch nonce
   nhận để buộc kết nối lại, nhưng không đọc hay sửa được dữ liệu.
-- **Test hook** (`CONFIG_TM_TEST_HOOKS`, ví dụ `WIFI_DOWN <s>`) bật trong bản build mặc
-  định và bị tắt bởi `--prod`. Không đem bản không phải `--prod` đi dùng thật.
+- **Test hook** (`CONFIG_TM_TEST_HOOKS`, ví dụ `WIFI_DOWN <s>`) và dịch vụ test UDP echo/sink
+  (`CONFIG_TM_ECHO_SERVICE`, tốn khoảng 11 KB heap) bật trong bản build mặc định và bị
+  tắt bởi `--prod`. Không đem bản không phải `--prod` đi dùng thật.
 - Không bao giờ commit nội dung trong `secrets/` hay bất kỳ file `sdkconfig.secrets`
   nào. Cả hai đều đã được git-ignore.
 

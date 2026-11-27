@@ -106,3 +106,58 @@ mbedTLS failing to allocate its 4.4 KB output record (`-0x7f00`, 27 times in
 15 minutes). Now 8 (wrapped in `#ifndef` so a build can override it), together
 with fewer Wi-Fi RX buffers for exit-node builds (`tm config`: 10). A larger
 lwIP TCP send buffer (11488) was tried first and made the heap pressure worse.
+
+## 6. One TLS record per DERP frame (`src/ml_derp.c`)
+
+`derp_write_frame()` wrote the 5-byte frame header and the payload with two
+`mbedtls_ssl_write()` calls, so every packet sent through DERP became two TLS
+records: two AEAD operations, two record headers and, with
+`CONFIG_MBEDTLS_DYNAMIC_BUFFER`, two output-buffer allocations. Header and
+payload now go out in one buffer and one write (`derp_put_header()`;
+`derp_send_packet()` builds header + key + payload in a single allocation,
+frames of up to 64 bytes use the stack).
+
+## 7. Shed WireGuard data before the DERP queue is full; DERP counters
+
+`ml_derp_queue_send()` used to accept data until the queue was full and then
+evict the oldest entries. By then the queue and the backed-up TLS stream held
+the heap that the TLS output record needs. WireGuard transport data (type 4,
+which includes all exit-node traffic) is now dropped once
+`ML_DERP_TX_QUEUE_DEPTH - ML_DERP_TX_RESERVED` (8 - 2) packets are queued.
+Handshakes, cookie replies and DISCO can still use the last slots, and TCP on
+the peer backs off.
+
+Counters on `ml_derp_conn_t`, exposed with `microlink_get_derp_stats()`:
+`tx_shed` (dropped early, above), `tx_down` (dropped by `wg_derp_output_cb`
+while DERP was disconnected) and `reconnects`. The application prints them as
+`METRIC {"ev":"derp",...}`, and `tools/bench/soak.py` grades them as case S8.
+
+## 8. DERP TLS: never return part of a record header; ENOMEM is back-pressure (`src/ml_derp.c`)
+
+The DERP session failed under load with `DERP header read returned -29184
+(0x7200)`, which is `MBEDTLS_ERR_SSL_INVALID_RECORD`. The cause is in ESP-IDF's
+dynamic RX buffer (`CONFIG_MBEDTLS_DYNAMIC_BUFFER`,
+`esp_mbedtls_add_rx_buffer()` in IDF v5.3.6). It fetches each 5-byte TLS record
+header into a local stack array (`msg_head[5]`), while
+`mbedtls_ssl_fetch_input()` keeps the number of header bytes already read
+(`in_left`) in the SSL context. On our non-blocking socket, a header split
+across TCP segments returns `WANT_READ` part-way. The bytes already read are
+then lost with the stack frame, the next call completes the header with stack
+garbage, and parsing fails. Split headers happen more often at high packet
+rates, which is why the error clustered in speed tests.
+
+`ml_derp_bio_recv()` now stages requests of at most 13 bytes
+(`DERP_BIO_WHOLE_MAX`, which covers the 5-byte TLS header) in
+`ml_derp_conn_t.hdr_stage`. That buffer survives across calls and is reset for
+every new socket. The request is handed to mbedTLS only once it is complete,
+so `in_left` never holds a partial header. Longer requests (record bodies) go
+into the heap RX buffer, which survives partial reads, and are read straight
+from the socket. A first version used `recv(MSG_PEEK)` instead. lwIP peeks
+only inside the current pbuf, never across the segment boundary that splits
+the header, so RX stalled and throughput halved. Do not go back to it.
+
+`ml_derp_bio_send()` also maps `ENOMEM` / `ENOBUFS` (lwIP `ERR_MEM`: pbufs or
+TCP queue slots briefly exhausted) to `WANT_WRITE`, like `EAGAIN`, within the
+5 s stall budget of patch 4. These used to come back as
+`MBEDTLS_ERR_NET_SEND_FAILED` (-0x0050) and rebuild the session (4 times in
+4 minutes of load).

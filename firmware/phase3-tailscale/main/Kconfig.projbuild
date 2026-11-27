@@ -1,7 +1,17 @@
 menu "tailmote Phase 3"
 
+    config TM_ECHO_SERVICE
+        bool "UDP echo / sink test service on the tailnet IP"
+        default y
+        help
+            Opens one MicroLink UDP socket (~11 KB of heap for the life of
+            the connection) for the bench tools: RTT echo, UDP sink, test
+            hooks. Off in production builds (sdkconfig.prod.defaults), where
+            the heap is needed for exit-node forwarding over DERP.
+
     config TM_ECHO_PORT
         int "UDP echo port on the tailnet IP (test service)"
+        depends on TM_ECHO_SERVICE
         default 7
         help
             Port 7 matches tools/bench/wg_bench.py rtt (UDP_ECHO), so
@@ -9,6 +19,7 @@ menu "tailmote Phase 3"
 
     config TM_TEST_HOOKS
         bool "Test hooks on the echo port (WIFI_DOWN <s>)"
+        depends on TM_ECHO_SERVICE
         default y
         help
             Lets any tailnet peer allowed by the ACL to reach the echo port

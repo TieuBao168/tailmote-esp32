@@ -119,6 +119,11 @@ extern "C" {
 #ifndef ML_DERP_TX_QUEUE_DEPTH
 #define ML_DERP_TX_QUEUE_DEPTH  8
 #endif
+/* tailmote: slots kept free of WireGuard data for handshakes / DISCO;
+ * data is shed once DEPTH - RESERVED packets are queued (ml_derp.c). */
+#ifndef ML_DERP_TX_RESERVED
+#define ML_DERP_TX_RESERVED     2
+#endif
 #define ML_DISCO_RX_QUEUE_DEPTH 16
 /* Deep enough to hold a TCP window's worth of packets while the manager task
  * is busy with a handshake or a DISCO probe round. The enqueue in
@@ -467,6 +472,14 @@ typedef struct {
 #endif
     bool connected;
     uint64_t last_recv_ms;          /* For keepalive watchdog */
+    /* tailmote counters (microlink_get_derp_stats) */
+    uint32_t tx_shed;               /* WG data shed early: queue nearly full */
+    uint32_t reconnects;            /* DERP reconnects requested */
+    uint32_t tx_down;               /* packets dropped while DERP was down */
+    /* tailmote: TLS record-header bytes received so far but not yet handed
+     * to mbedTLS (see ml_derp_bio_recv); reset with every new socket. */
+    uint8_t hdr_stage[13];
+    uint8_t hdr_have;
 } ml_derp_conn_t;
 
 /* ============================================================================

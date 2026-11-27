@@ -276,6 +276,14 @@ void microlink_set_peer_callback(microlink_t *ml, microlink_peer_cb_t cb, void *
 void microlink_set_data_callback(microlink_t *ml, microlink_data_cb_t cb, void *user_data);
 
 /**
+ * @brief DERP counters (tailmote), cumulative since microlink_init():
+ * WireGuard data shed early because the DERP TX queue was nearly full,
+ * packets dropped while DERP was down, and DERP reconnects requested.
+ */
+void microlink_get_derp_stats(const microlink_t *ml, uint32_t *tx_shed, uint32_t *tx_down,
+                              uint32_t *reconnects);
+
+/**
  * @brief Convert VPN IP to string
  */
 void microlink_ip_to_str(uint32_t ip, char *buf);

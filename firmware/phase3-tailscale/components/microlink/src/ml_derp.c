@@ -39,6 +39,7 @@
 #endif
 #include "nacl_box.h"
 #include <string.h>
+#include <stddef.h>
 #include <errno.h>
 #include <fcntl.h>
 
@@ -67,9 +68,51 @@ static const char *TAG = "ml_derp";
  * SO_RCVTIMEO on the socket bounds the wait; a timeout surfaces as
  * EAGAIN/EWOULDBLOCK which we map to MBEDTLS_ERR_SSL_WANT_READ.
  */
+/* tailmote: ESP-IDF's dynamic RX buffer (CONFIG_MBEDTLS_DYNAMIC_BUFFER,
+ * esp_mbedtls_add_rx_buffer) fetches each 5-byte TLS record header into a
+ * local stack array, while mbedtls_ssl_fetch_input() keeps the count of
+ * header bytes already read (in_left) in the context. If only part of the
+ * header has arrived and the read returns WANT_READ, those bytes are lost with
+ * the stack frame; the next call completes the header with garbage and fails
+ * with MBEDTLS_ERR_SSL_INVALID_RECORD (-0x7200), which tore the DERP session
+ * down under load (TCP segments split headers more often then).
+ *
+ * So never hand mbedTLS part of a header-sized request: such reads are staged
+ * in ml_derp_conn_t.hdr_stage, which survives across calls, and returned only
+ * once complete. (MSG_PEEK cannot do this: lwIP peeks into the current pbuf
+ * only, i.e. never across the very segment boundary that splits a header.)
+ * Longer requests (record bodies) land in the heap RX buffer, which survives
+ * a partial read, and go straight to the socket. */
+#define DERP_BIO_WHOLE_MAX 13   /* >= TLS record header (5), DTLS header (13) */
+
+static int derp_bio_errno(void) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return MBEDTLS_ERR_SSL_WANT_READ;
+    if (errno == EPIPE || errno == ECONNRESET) return MBEDTLS_ERR_NET_CONN_RESET;
+    return MBEDTLS_ERR_NET_RECV_FAILED;
+}
+
 static int ml_derp_bio_recv(void *ctx, unsigned char *buf, size_t len) {
     int fd = *(int *)ctx;
     if (fd < 0) return MBEDTLS_ERR_NET_INVALID_CONTEXT;
+
+#if defined(CONFIG_MBEDTLS_DYNAMIC_BUFFER)
+    ml_derp_conn_t *c = (ml_derp_conn_t *)((char *)ctx - offsetof(ml_derp_conn_t, sockfd));
+    if (len <= DERP_BIO_WHOLE_MAX || c->hdr_have) {
+        if (len > DERP_BIO_WHOLE_MAX) len = DERP_BIO_WHOLE_MAX;   /* unreachable in practice */
+        while (c->hdr_have < len) {
+            int r = (int)ml_read_sock(fd, c->hdr_stage + c->hdr_have, len - c->hdr_have);
+            if (r == 0) return MBEDTLS_ERR_NET_CONN_RESET;
+            if (r < 0) return derp_bio_errno();   /* staged bytes are kept */
+            c->hdr_have += (uint8_t)r;
+        }
+        memcpy(buf, c->hdr_stage, len);
+        if (c->hdr_have > len) {                  /* cannot happen: reads are capped at len */
+            memmove(c->hdr_stage, c->hdr_stage + len, c->hdr_have - len);
+        }
+        c->hdr_have -= (uint8_t)len;
+        return (int)len;
+    }
+#endif
 
     int ret = (int)ml_read_sock(fd, buf, len);
     if (ret < 0) {
@@ -99,7 +142,12 @@ static int ml_derp_bio_send(void *ctx, const unsigned char *buf, size_t len) {
 
     int ret = (int)ml_write_sock(fd, buf, len);
     if (ret < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        /* tailmote: ENOMEM / ENOBUFS = lwIP ran out of pbufs or TCP queue
+         * slots for a moment (ERR_MEM). That is back-pressure, not a dead
+         * stream: retry like EAGAIN, bounded by derp_tls_write_all()'s 5 s
+         * stall budget. It used to surface as MBEDTLS_ERR_NET_SEND_FAILED
+         * (-0x0050) and rebuild the session under load. */
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOMEM || errno == ENOBUFS) {
             return MBEDTLS_ERR_SSL_WANT_WRITE;
         }
         if (errno == EPIPE || errno == ECONNRESET) {
@@ -259,37 +307,51 @@ static int derp_tls_write_all(microlink_t *ml, const uint8_t *data, size_t len) 
     return (int)written;
 }
 
+/* tailmote: every DERP frame goes out in ONE mbedtls_ssl_write() call. The
+ * upstream code wrote the 5-byte header and the payload separately, and each
+ * mbedtls_ssl_write() becomes its own TLS record: two records per forwarded
+ * packet, i.e. twice the AEAD runs, record headers and (with
+ * CONFIG_MBEDTLS_DYNAMIC_BUFFER) output-buffer allocations on the hot path. */
+static void derp_put_header(uint8_t *h, uint8_t type, uint32_t len) {
+    /* 5-byte header: 1 type + 4 length (big-endian) */
+    h[0] = type;
+    h[1] = (len >> 24) & 0xFF;
+    h[2] = (len >> 16) & 0xFF;
+    h[3] = (len >> 8) & 0xFF;
+    h[4] = len & 0xFF;
+}
+
 /* Write a complete DERP frame via TLS */
 static int derp_write_frame(microlink_t *ml, uint8_t type,
                              const uint8_t *payload, uint32_t len) {
-    /* 5-byte header: 1 type + 4 length (big-endian) */
-    uint8_t header[5];
-    header[0] = type;
-    header[1] = (len >> 24) & 0xFF;
-    header[2] = (len >> 16) & 0xFF;
-    header[3] = (len >> 8) & 0xFF;
-    header[4] = len & 0xFF;
-
-    if (derp_tls_write_all(ml, header, 5) < 0) return -1;
-
-    if (len > 0 && payload) {
-        if (derp_tls_write_all(ml, payload, len) < 0) return -1;
+    if (len == 0 || !payload) {
+        uint8_t header[5];
+        derp_put_header(header, type, 0);
+        return derp_tls_write_all(ml, header, 5) < 0 ? -1 : 0;
     }
-    return 0;
+    uint8_t small[5 + 64];
+    uint8_t *buf = (len <= 64) ? small : malloc(5 + len);
+    if (!buf) return -1;
+    derp_put_header(buf, type, len);
+    memcpy(buf + 5, payload, len);
+    int ret = derp_tls_write_all(ml, buf, 5 + len) < 0 ? -1 : 0;
+    if (buf != small) free(buf);
+    return ret;
 }
 
 /* Send a packet to a peer via DERP */
 static int derp_send_packet(microlink_t *ml, const uint8_t *dest_key,
                               const uint8_t *data, size_t len) {
-    /* SendPacket frame: 32-byte dest key + payload */
+    /* SendPacket frame: header + 32-byte dest key + payload, one buffer */
     size_t frame_len = 32 + len;
-    uint8_t *frame = malloc(frame_len);
+    uint8_t *frame = malloc(5 + frame_len);
     if (!frame) return -1;
 
-    memcpy(frame, dest_key, 32);
-    memcpy(frame + 32, data, len);
+    derp_put_header(frame, DERP_FRAME_SEND_PACKET, (uint32_t)frame_len);
+    memcpy(frame + 5, dest_key, 32);
+    memcpy(frame + 5 + 32, data, len);
 
-    int ret = derp_write_frame(ml, DERP_FRAME_SEND_PACKET, frame, frame_len);
+    int ret = derp_tls_write_all(ml, frame, 5 + frame_len) < 0 ? -1 : 0;
     if (ret < 0) {
         ESP_LOGW(TAG, "derp_send_packet FAILED: dest=%02x%02x%02x%02x len=%d",
                  dest_key[0], dest_key[1], dest_key[2], dest_key[3], (int)len);
@@ -581,6 +643,21 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
      * This ensures handshake responses aren't delayed behind DISCO pings. */
     bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
 
+    /* tailmote: shed WireGuard transport data (type 4: tunnel traffic, incl.
+     * everything forwarded for exit-node peers) while the queue is nearly
+     * full, before it is completely full. Waiting for "full" meant the queue
+     * plus the backed-up TLS stream already held the heap the TLS output
+     * record needs, and the session then failed (-0x7f00). Handshakes, cookie
+     * replies and DISCO keep the last slots; TCP on the peer backs off from
+     * the early drops. */
+    bool is_wg_data = (len >= 4 && data[0] == 0x04);
+    if (is_wg_data &&
+        uxQueueMessagesWaiting(ml->derp_tx_queue) >= ML_DERP_TX_QUEUE_DEPTH - ML_DERP_TX_RESERVED) {
+        free(pkt_data);
+        ml->derp.tx_shed++;
+        return ESP_ERR_TIMEOUT;
+    }
+
     /* Try to send to queue */
     if ((is_wg_handshake ? xQueueSendToFront(ml->derp_tx_queue, &item, 0)
                          : xQueueSend(ml->derp_tx_queue, &item, 0)) == pdTRUE) {
@@ -683,6 +760,7 @@ void ml_derp_tx_task(void *arg) {
                 xEventGroupClearBits(ml->events, ML_EVT_DERP_RECONNECT);
                 ESP_LOGW(TAG, "DERP reconnect requested (was %s)",
                          ml->derp.connected ? "connected" : "disconnected");
+                ml->derp.reconnects++;
                 ml_derp_disconnect(ml);
                 verbose_phase = false;
                 /* Auto-reconnect after disconnect */
@@ -989,6 +1067,7 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
      * which transparently support both lwIP and AT socket backends.
      * Timeout is handled via SO_RCVTIMEO. */
     ml->derp.sockfd = sock;
+    ml->derp.hdr_have = 0;   /* tailmote: new stream, no staged header */
     /* Pass a blocking recv as f_recv and set f_recv_timeout to NULL
      * (same scheme as the control plane; avoids the TLS 1.3 Bad input
      * data failure). */
@@ -1309,4 +1388,13 @@ void ml_derp_disconnect(microlink_t *ml) {
     }
 
     ESP_LOGI(TAG, "DERP disconnected");
+}
+
+/* tailmote: DERP counters for the application's telemetry. Plain reads of
+ * 32-bit counters written by the DERP task; a torn value is impossible. */
+void microlink_get_derp_stats(const microlink_t *ml, uint32_t *tx_shed, uint32_t *tx_down,
+                              uint32_t *reconnects) {
+    if (tx_shed) *tx_shed = ml ? ml->derp.tx_shed : 0;
+    if (tx_down) *tx_down = ml ? ml->derp.tx_down : 0;
+    if (reconnects) *reconnects = ml ? ml->derp.reconnects : 0;
 }

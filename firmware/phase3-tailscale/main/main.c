@@ -8,7 +8,8 @@
  * METRIC line with free / largest internal heap (docs/03 section 3, risk 1:
  * the MapResponse cJSON tree on a board without PSRAM).
  *
- * Test service: UDP echo on CONFIG_TM_ECHO_PORT (default 7) of the tailnet IP:
+ * Test service (CONFIG_TM_ECHO_SERVICE, off in --prod builds): UDP echo on
+ * CONFIG_TM_ECHO_PORT (default 7) of the tailnet IP:
  *   python tools/bench/wg_bench.py rtt --host <100.x.y.z>
  */
 #include <stdio.h>
@@ -39,15 +40,17 @@ static EventGroupHandle_t s_wifi_ev;
 #define WIFI_GOT_IP_BIT BIT0
 
 static microlink_t *s_ml;
+static volatile bool s_wifi_hold;   /* test hook: Wi-Fi kept down */
+#if CONFIG_TM_ECHO_SERVICE
 static microlink_udp_socket_t *s_echo;
 static volatile uint32_t s_echo_rx;
-static volatile bool s_wifi_hold;   /* test hook: Wi-Fi kept down */
 
 /* UDP sink counters (same STAT JSON as Phase 2 bench.c, for wg_bench.py udp-rx) */
 static struct {
     uint32_t pkts, max_seq, reorder, last_seq, t_first, t_last;
     uint64_t bytes;
 } s_sink;
+#endif
 
 /* ------------------------------------------------------------- chip info -- */
 static void report_chip(void)
@@ -232,6 +235,7 @@ static void wifi_down_task(void *arg)
 }
 #endif
 
+#if CONFIG_TM_ECHO_SERVICE
 /* One socket (each MicroLink UDP socket costs ~11 KB of RAM) multiplexes:
  *   "RST" / "STAT"      UDP sink control (reply "OK" / JSON), as Phase 2;
  *   "SINK"+u32 seq+...  sink data, counted, no reply (wg_bench.py --sink-prefix SINK);
@@ -287,6 +291,7 @@ static void on_echo_rx(microlink_udp_socket_t *sock, uint32_t src_ip, uint16_t s
     s_echo_rx++;
     microlink_udp_send(sock, src_ip, src_port, data, len);
 }
+#endif /* CONFIG_TM_ECHO_SERVICE */
 
 /* Any malloc that fails is a RAM-budget bug on this board: report it. Runs in
  * the failing caller's context, so only ROM printf (no heap). */
@@ -322,10 +327,22 @@ static void report_heap_low(void)
 static void supervisor_task(void *arg)
 {
     bool reported = false;
+    uint32_t ticks = 0;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(250));
         report_heap_low();
+        /* DERP counters every metrics period: early sheds, drops while DERP
+         * was down, reconnects (cumulative since boot). */
+        if (++ticks % (CONFIG_TM_METRICS_PERIOD_S * 4) == 0) {
+            uint32_t shed, down, reconnects;
+            microlink_get_derp_stats(s_ml, &shed, &down, &reconnects);
+            char extra[96];
+            snprintf(extra, sizeof(extra), "\"tx_shed\":%u,\"tx_down\":%u,\"reconnects\":%u",
+                     (unsigned)shed, (unsigned)down, (unsigned)reconnects);
+            metrics_event("derp", extra);
+        }
         bool up = microlink_is_connected(s_ml);
+#if CONFIG_TM_ECHO_SERVICE
         if (up && !s_echo) {
             metrics_heap_t before = metrics_heap_now();
             s_echo = microlink_udp_create(s_ml, CONFIG_TM_ECHO_PORT);
@@ -334,6 +351,7 @@ static void supervisor_task(void *arg)
                 metrics_heap_delta("echo_socket", before);
             }
         }
+#endif
         if (up && !reported) {
             char extra[48];
             snprintf(extra, sizeof(extra), "\"peers\":%d", microlink_get_peer_count(s_ml));

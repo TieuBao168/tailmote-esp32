@@ -161,6 +161,7 @@ static err_t wg_derp_output_cb(const uint8_t *peer_public_key,
                                 const uint8_t *data, size_t len, void *ctx) {
     microlink_t *ml = (microlink_t *)ctx;
     if (!ml || !ml->derp.connected) {
+        if (ml) ml->derp.tx_down++;
         ESP_LOGW(TAG, "DERP output cb: not connected, dropping %d bytes", (int)len);
         return ERR_CONN;
     }

@@ -3,6 +3,8 @@
 #
 # - No test hooks: WIFI_DOWN on the echo port would let any tailnet peer the
 #   ACL admits take the board offline.
+# - No echo / sink test service: its UDP socket keeps ~11 KB of heap, which
+#   exit-node forwarding over DERP needs (heap fell to ~6 KB under load).
 # - Warnings only in the logs (MicroLink's own INFO logs cost ~20 KB of flash
 #   and leak peer names / IPs to anyone on the serial port). METRIC lines are
 #   printf and stay.
@@ -13,5 +15,6 @@
 # production hardware, following ESP-IDF's flash-encryption guide
 # (docs/03 section 10).
 CONFIG_TM_TEST_HOOKS=n
+CONFIG_TM_ECHO_SERVICE=n
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_ML_LOG_LEVEL_WARN=y
