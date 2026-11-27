@@ -223,7 +223,16 @@ nhận (`CONFIG_ML_SUBNET_ROUTER`), còn `tm config` bật nó lên dựa theo f
 3. Trong log boot, tìm dòng `Advertising route 0.0.0.0/0 (exit node)`.
 4. Trong [trang admin](https://login.tailscale.com/admin/machines), mở board, chọn
    **Edit route settings…** và bật **Use as exit node** (cùng các subnet route nếu có).
-5. Trên điện thoại hoặc laptop, mở app Tailscale → **Exit node** → chọn board.
+5. **Bắt buộc: cấu hình DNS cho máy dùng exit node.** Trong trang admin, mục
+   [DNS](https://login.tailscale.com/admin/dns): thêm nameserver toàn cục (ví dụ `1.1.1.1`
+   và `8.8.8.8`), bật **Override DNS servers**, và bật **Use with exit node** cho từng
+   nameserver. Mặc định, máy dùng exit node gửi DNS tới dịch vụ DNS riêng của exit node,
+   mà MicroLink không có dịch vụ này. Thiếu bước này thì ping và địa chỉ IP vẫn chạy,
+   nhưng không phân giải được tên miền nào.
+6. Kiểm tra policy grant có cho thiết bị của bạn dùng exit node: phải có một grant với
+   `"dst": ["autogroup:internet"]`. Nếu thiếu, board sẽ không hiện trong danh sách exit
+   node trên điện thoại.
+7. Trên điện thoại hoặc laptop, mở app Tailscale → **Exit node** → chọn board.
 
 Những điều cần biết:
 
@@ -244,9 +253,10 @@ Những điều cần biết:
   traffic qua board hoặc tắt exit node.
 - **Peer dùng exit node cũng vào được LAN của board,** vì board chuyển tiếp gói tới mọi
   địa chỉ. Chỉ cho các thiết bị bạn tin dùng, và giới hạn bằng ACL.
-- **Nếu bật exit node mà không phân giải được tên miền (DNS),** vào trang admin mục
-  **DNS**, đặt nameserver toàn cục (ví dụ `1.1.1.1`) và bật *Override local DNS*.
-  MicroLink không chạy bộ proxy DNS của Tailscale cho client dùng exit node.
+- **Sau NAT khó thì sẽ chậm.** Nếu cả hai phía đều nằm sau NAT không đục lỗ được (ví
+  dụ board sau symmetric NAT, điện thoại trên 4G CGNAT), mọi gói phải đi qua relay DERP.
+  Khi đó log boot có dòng `Symmetric NAT detected`, và app Tailscale báo *Relayed
+  connection*. Mạng qua router gia đình thường đi thẳng được, nhanh hơn nhiều.
 
 Muốn tắt, đặt `TS_EXIT_NODE=''`, rồi chạy lại `make config`, build và flash.
 

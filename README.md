@@ -224,7 +224,16 @@ of the board's Wi-Fi network. MicroLink provides the forwarding and NAPT
 4. In the [admin console](https://login.tailscale.com/admin/machines), open the board,
    choose **Edit route settings…** and enable **Use as exit node** (and any subnet
    routes).
-5. On the phone or laptop, open the Tailscale app → **Exit node** → pick the board.
+5. **Required: set up DNS for exit-node clients.** In the admin console under
+   [DNS](https://login.tailscale.com/admin/dns), add global nameservers (e.g. `1.1.1.1`
+   and `8.8.8.8`), enable **Override DNS servers**, and turn on **Use with exit node** for
+   each nameserver. By default, a client using an exit node sends its DNS queries to the
+   exit node's own DNS proxy, which MicroLink does not have. Without this setting, ping
+   and IP addresses work but no hostname resolves.
+6. Make sure the grant policy lets your devices use exit nodes: it needs a grant with
+   `"dst": ["autogroup:internet"]`. If the policy has no such grant, the board does not
+   appear in the phone's exit-node list.
+7. On the phone or laptop, open the Tailscale app → **Exit node** → pick the board.
 
 What to expect:
 
@@ -246,9 +255,11 @@ What to expect:
 - **Peers that use the exit node can also reach the board's LAN**, because traffic is
   forwarded to any destination. Only share it with devices you trust, and restrict it
   with ACLs.
-- **If DNS fails while the exit node is on,** set global nameservers (e.g. `1.1.1.1`) in
-  the admin console under **DNS**, with *Override local DNS* enabled. MicroLink does
-  not run Tailscale's DNS proxy for exit-node clients.
+- **Expect it to be slow behind hard NATs.** If both sides sit behind NATs that cannot be
+  traversed (e.g. the board behind a symmetric NAT and the phone on 4G CGNAT), every
+  packet goes through a DERP relay. The boot log then shows `Symmetric NAT detected`,
+  and the Tailscale app shows *Relayed connection*. A home router network usually
+  allows a direct path, which is much faster.
 
 To turn it off, set `TS_EXIT_NODE=''`, then run `make config`, build and flash again.
 
