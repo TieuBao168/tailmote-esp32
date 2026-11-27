@@ -222,11 +222,19 @@ static esp_err_t derp_recv_frame_header(microlink_t *ml, uint8_t *type,
  * Write exactly `len` bytes via TLS with WANT_WRITE retry.
  * Returns bytes written on success, -1 on error.
  * No mutex needed — called only from the DERP I/O task.
+ *
+ * tailmote: the stall budget is time based and 5 s (was 50 x 10 ms = 500 ms,
+ * reset on every partial write). Forwarding exit-node traffic fills the small
+ * lwIP send buffer for longer than 500 ms on a ~30 ms DERP path, and each
+ * timeout tore down and rebuilt the TLS session (seconds, ~30 KB of heap,
+ * every queued packet dropped): 14 rebuilds in 5 minutes under a phone's load.
+ * A stream that makes no progress for 5 s is still treated as dead.
  */
+#define DERP_WRITE_STALL_MS 5000
 static int derp_tls_write_all(microlink_t *ml, const uint8_t *data, size_t len) {
     size_t written = 0;
     int retries = 0;
-    const int max_retries = 50;  /* 50 * 10ms = 500ms max */
+    uint64_t stalled_since = ml_get_time_ms();
 
     while (written < len) {
         int ret = mbedtls_ssl_write(&ml->derp.ssl, data + written, len - written);
@@ -234,8 +242,9 @@ static int derp_tls_write_all(microlink_t *ml, const uint8_t *data, size_t len) 
             if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
                 ret == MBEDTLS_ERR_SSL_TIMEOUT) {
                 vTaskDelay(pdMS_TO_TICKS(10));
-                if (++retries > max_retries) {
-                    ESP_LOGW(TAG, "TLS write timeout after %d retries", retries);
+                retries++;
+                if (ml_get_time_ms() - stalled_since > DERP_WRITE_STALL_MS) {
+                    ESP_LOGW(TAG, "TLS write stalled %d ms (%d retries)", DERP_WRITE_STALL_MS, retries);
                     return -1;
                 }
                 continue;
@@ -245,6 +254,7 @@ static int derp_tls_write_all(microlink_t *ml, const uint8_t *data, size_t len) 
         }
         written += ret;
         retries = 0;
+        stalled_since = ml_get_time_ms();
     }
     return (int)written;
 }

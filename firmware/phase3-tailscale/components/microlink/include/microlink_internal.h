@@ -113,7 +113,12 @@ extern "C" {
 #define ML_TASK_UDP_RX_PRIO     CONFIG_ML_UDP_RX_TASK_PRIO
 
 /* Queue depths */
-#define ML_DERP_TX_QUEUE_DEPTH  16
+/* tailmote: 8 (was 16). Each queued packet is a heap copy of up to ~1.3 KB;
+ * when forwarding exit-node traffic over DERP a full queue held ~21 KB that
+ * the TLS output record (4.4 KB) then failed to allocate. Overridable. */
+#ifndef ML_DERP_TX_QUEUE_DEPTH
+#define ML_DERP_TX_QUEUE_DEPTH  8
+#endif
 #define ML_DISCO_RX_QUEUE_DEPTH 16
 /* Deep enough to hold a TCP window's worth of packets while the manager task
  * is busy with a handshake or a DISCO probe round. The enqueue in

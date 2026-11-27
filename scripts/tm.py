@@ -331,8 +331,11 @@ def gen_ts_config(s, fw_dir):
             # RX buffers (~1.7 KB each) + a 64-packet tcpip mailbox the backlog
             # outgrew the heap on the board (1171 failed allocations within
             # seconds). Smaller queues drop the excess instead, and TCP on the
-            # peer backs off to the tunnel's pace.
-            "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16",
+            # peer backs off to the tunnel's pace. RX is 10, not 16: on a
+            # relayed (DERP) path the TLS session needs a 4.4 KB output record
+            # under load, and 16 RX buffers left too little heap for it. A
+            # larger TCP send buffer (11488) was tried and made this worse.
+            "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=10",
             "CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16",
             "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16",
         ]

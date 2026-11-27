@@ -171,8 +171,9 @@ class GenConfig(unittest.TestCase):
             self.assertIn('CONFIG_ML_ADVERTISE_ROUTES="0.0.0.0/0,192.168.1.0/24,10.0.0.0/8"\n', sdk)
             self.assertIn("# CONFIG_ML_ROUTER_IPV6 is not set\n", sdk)
             # Bounded RX/TX queues so forwarding backlog cannot exhaust the heap.
-            self.assertIn("CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16\n", sdk)
+            self.assertIn("CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=10\n", sdk)
             self.assertIn("CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16\n", sdk)
+            self.assertNotIn("CONFIG_LWIP_TCP_SND_BUF_DEFAULT", sdk)
 
     def test_ts_routes(self):
         base = dict(tm.SECRET_DEFAULTS, WIFI_SSID="lab")

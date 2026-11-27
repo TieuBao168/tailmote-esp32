@@ -79,3 +79,30 @@ or covered by the validator):
 After the last fix: ~9.8 million inputs (5 × 60 s + 600 s), 0 failures. The
 real Tailscale netmap still passes `json_valid()` and is pruned as before
 (checked on the board).
+
+## 4. DERP write stall budget: 5 s, time based (`src/ml_derp.c`)
+
+`derp_tls_write_all()` gave up after 50 × 10 ms (500 ms) of `WANT_WRITE`,
+counting from the last partial write, and the caller then tore down and rebuilt
+the DERP TLS session. With the board as an exit node for a relayed phone
+(symmetric NAT + 4G CGNAT, so every packet goes through DERP), the small lwIP
+send buffer stayed full for longer than that: in 5 minutes of a speed test the
+session was rebuilt 14 times, 291 packets were dropped while it was down, and
+each rebuild (seconds of CPU, ~30 KB of heap) pushed the heap low enough that
+mbedTLS failed to allocate its 4.4 KB output record (`-0x7f00`), which broke
+the session again.
+
+The budget is now 5 s without progress (`DERP_WRITE_STALL_MS`), matching the
+5 s payload read timeout; any progress restarts it. A stream that is really
+dead still fails, after 5 s instead of 0.5 s. Re-test: stall timeouts fell from
+8 to 2 in a comparable run.
+
+## 5. DERP TX queue depth 8, overridable (`include/microlink_internal.h`)
+
+`ML_DERP_TX_QUEUE_DEPTH` was 16; each queued packet is a heap copy of up to
+~1.3 KB, so a full queue held ~21 KB while the TLS stream was backed up. With
+the 5 s stall budget above, the remaining DERP rebuilds under load were all
+mbedTLS failing to allocate its 4.4 KB output record (`-0x7f00`, 27 times in
+15 minutes). Now 8 (wrapped in `#ifndef` so a build can override it), together
+with fewer Wi-Fi RX buffers for exit-node builds (`tm config`: 10). A larger
+lwIP TCP send buffer (11488) was tried first and made the heap pressure worse.
