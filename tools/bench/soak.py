@@ -299,6 +299,10 @@ def analyse(rows, th):
             status = "WARN"
         r["cases"]["S3"] = (status, f"available {avail:.2f}% over {_fmt_dur(span)}, {len(outages)} outage(s), "
                             f"longest {_fmt_dur(longest)}" + (" — currently DOWN" if down_since else ""))
+    elif not boots and per:
+        # A --since window that starts after boot: the last state change is
+        # outside it, so availability cannot be graded here.
+        r["cases"]["S3"] = ("WARN", "no ml_state change in this window (it starts after boot); not graded")
     else:
         r["cases"]["S3"] = ("FAIL" if r["span_s"] > 120 else "WARN", "never reached CONNECTED")
 
@@ -369,6 +373,37 @@ def analyse(rows, th):
     return r
 
 
+def timeline(rows, step_s=60):
+    """Per-interval board load: [(start, cpu0_max, cpu1_max, heap_min_free, largest_min,
+    accepted_per_s, alloc_failed)]. accepted_per_s counts tunnel packets the
+    packet filter let in (phone -> board, exit-node traffic included)."""
+    buckets = {}
+    prev = None
+    for ts, kind, p in rows:
+        if kind != "metric":
+            continue
+        key = ts.replace(second=0, microsecond=0) if step_s == 60 else \
+            datetime.fromtimestamp(int(ts.timestamp()) // step_s * step_s)
+        b = buckets.setdefault(key, {"cpu0": 0.0, "cpu1": 0.0, "heap": None, "largest": None,
+                                     "acc": 0, "alloc": 0})
+        ev = p.get("ev")
+        if ev == "periodic":
+            b["cpu0"] = max(b["cpu0"], p.get("cpu0", 0))
+            b["cpu1"] = max(b["cpu1"], p.get("cpu1", 0))
+            b["heap"] = p["heap"] if b["heap"] is None else min(b["heap"], p["heap"])
+            b["largest"] = p["largest"] if b["largest"] is None else min(b["largest"], p["largest"])
+        elif ev == "filter":
+            if prev is not None and p["accepted"] >= prev:
+                b["acc"] += p["accepted"] - prev
+            prev = p["accepted"]
+        elif ev == "boot":
+            prev = None
+        elif ev == "alloc_failed":
+            b["alloc"] += 1
+    return [(k, b["cpu0"], b["cpu1"], b["heap"], b["largest"], b["acc"] / step_s, b["alloc"])
+            for k, b in sorted(buckets.items())]
+
+
 def render(r):
     if r is None:
         return "No soak data yet.\n"
@@ -376,10 +411,17 @@ def render(r):
     overall = min((c[0] for c in r["cases"].values()), key=lambda s: order[s])
     out = [f"# Soak report — {overall}", "",
            f"- Window: {r['start']:%Y-%m-%d %H:%M} → {r['end']:%Y-%m-%d %H:%M} ({_fmt_dur(r['span_s'])})",
-           f"- Firmware: `{r.get('app')}`", "", "| Case | Result | Details |", "|---|---|---|"]
+           f"- Firmware: `{r.get('app') or 'unknown (no boot in this window)'}`", "", "| Case | Result | Details |", "|---|---|---|"]
     for cid in sorted(r["cases"]):
         st, det = r["cases"][cid]
         out.append(f"| {cid} {CASES[cid]} | **{st}** | {det} |")
+    if r.get("timeline"):
+        out += ["", "## Timeline (per minute)", "",
+                "| Time | CPU0 max % | CPU1 max % | Heap free min | Largest block min | Tunnel pkts/s | alloc_failed |",
+                "|---|---|---|---|---|---|---|"]
+        out += [f"| {k:%H:%M} | {c0:.1f} | {c1:.1f} | {h if h is not None else '-'} | "
+                f"{lg if lg is not None else '-'} | {acc:.1f} | {al} |"
+                for k, c0, c1, h, lg, acc, al in r["timeline"]]
     if r["outages"]:
         out += ["", "## Tailnet outages", "", "| Start | Duration |", "|---|---|"]
         out += [f"| {t:%m-%d %H:%M:%S} | {_fmt_dur(d)} |" for t, d in r["outages"][-20:]]
@@ -389,12 +431,28 @@ def render(r):
     return "\n".join(out) + "\n"
 
 
+def _when(text):
+    """'HH:MM' (today) or an ISO date-time, or None."""
+    if not text:
+        return None
+    if re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", text):
+        parts = [int(x) for x in text.split(":")] + [0]
+        return datetime.now().replace(hour=parts[0], minute=parts[1], second=parts[2], microsecond=0)
+    return datetime.fromisoformat(text)
+
+
 def report(a):
     paths = a.logs or sorted(glob.glob(os.path.join(a.dir, "soak-*.log")))
     if not paths:
         sys.exit(f"no soak logs in {a.dir}")
-    th = a
-    text = render(analyse(load(paths), th))
+    rows = load(paths)
+    since, until = _when(a.since), _when(a.until)
+    if since or until:
+        rows = [row for row in rows if (not since or row[0] >= since) and (not until or row[0] <= until)]
+    r = analyse(rows, a)
+    if r is not None and a.timeline:
+        r["timeline"] = timeline(rows)
+    text = render(r)
     if a.out:
         os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
         with open(a.out, "w", encoding="utf-8") as f:
@@ -416,6 +474,9 @@ def main(argv=None):
     r.add_argument("logs", nargs="*", help="log files (default: all soak-*.log in --dir)")
     r.add_argument("--dir", default="results/soak")
     r.add_argument("--out", help="also write the Markdown report here")
+    r.add_argument("--since", help="only lines from this time: HH:MM (today) or ISO date-time")
+    r.add_argument("--until", help="only lines up to this time: HH:MM (today) or ISO date-time")
+    r.add_argument("--timeline", action="store_true", help="add a per-minute load table")
     r.add_argument("--heap-min", type=int, default=10240, help="min heap watermark, bytes")
     r.add_argument("--leak-b-per-h", type=int, default=512, help="max heap decline, bytes/hour")
     r.add_argument("--warmup-s", type=int, default=300, help="ignore heap trend this long after boot")

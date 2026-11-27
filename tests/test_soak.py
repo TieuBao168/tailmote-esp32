@@ -121,6 +121,29 @@ class SoakReport(unittest.TestCase):
         self.assertEqual(r["cases"]["S4"][0], "FAIL")            # 290 s > 120 s
         self.assertIn("1 disconnect", r["cases"]["S4"][1])
 
+    def test_timeline_counts_tunnel_packets_per_second(self):
+        log = Log()
+        log.boot(0)
+        log.run(0, 600)                   # filter "accepted" grows by 1 per 10 s sample
+        tl = soak.timeline(log.rows())
+        full = [row for row in tl if row[0].minute in (2, 3, 4)]
+        self.assertTrue(full)
+        for _, c0, _, heap, _, acc, alloc in full:
+            self.assertAlmostEqual(acc, 0.1, places=2)   # 6 packets / 60 s
+            self.assertEqual(alloc, 0)
+            self.assertEqual(c0, 2.5)
+            self.assertEqual(heap, 60000)
+
+    def test_window_after_boot_is_not_graded_for_availability(self):
+        log = Log()
+        log.boot(0)
+        log.run(0, 1800)
+        rows = [row for row in log.rows() if row[0] >= T0 + timedelta(seconds=600)]
+        r = soak.analyse(rows, thresholds())
+        self.assertEqual(r["cases"]["S3"][0], "WARN")
+        self.assertIn("not graded", r["cases"]["S3"][1])
+        self.assertIn("unknown (no boot", soak.render(r))
+
     def test_warnings_grouped_by_message(self):
         log = Log()
         log.boot(0)
