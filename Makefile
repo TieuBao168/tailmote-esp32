@@ -10,7 +10,7 @@ HOST ?=
 LABEL ?=
 
 .PHONY: help doctor deps idf setup secrets config build size flash monitor flash-monitor \
-        menuconfig clean fullclean docker-build peer-up peer-down peer-status log bench metrics test
+        menuconfig clean fullclean docker-build peer-up peer-down peer-status log bench metrics soak soak-report test
 
 help: ## List the commands
 	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z_-]+:.*## /{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -64,6 +64,10 @@ bench: ## Run the benchmarks over the tunnel (HOST=<ip> for a LAN baseline, LABE
 	@$(TM) bench $(if $(HOST),--host "$(HOST)") $(if $(LABEL),--label "$(LABEL)")
 metrics: ## Summarize results/serial.log → results/periodic.csv
 	@$(TM) metrics
+soak: ## Long-running stability capture → results/soak/ (Ctrl-C to stop)
+	@$(TM) soak
+soak-report: ## Grade the soak cases → results/soak/report.md
+	@$(TM) soak-report
 
 ## ---- Development ----
 test: ## Unit tests for the tooling (no board / ESP-IDF needed)

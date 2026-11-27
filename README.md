@@ -283,6 +283,7 @@ To turn it off, set `TS_EXIT_NODE=''`, then run `make config`, build and flash a
 | `log` | Reset the board and capture serial output → `results/serial.log` |
 | `bench` | Run the Phase 2 benchmark suite (`--host <ip>` for a LAN baseline, `--label …`) |
 | `metrics` | Summarize `results/serial.log` → `results/periodic.csv` |
+| `soak` / `soak-report` | Long-running stability capture → `results/soak/`, and grading of the soak cases ([docs/04](docs/04-soak-test.md)) |
 | `fuzz` | Fuzz MicroLink's JSON pruner on the host (`--seconds N`, `--seed S`) |
 | `test` | Tooling and host-side unit tests (no board or ESP-IDF needed) |
 

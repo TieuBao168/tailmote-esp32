@@ -280,6 +280,7 @@ Muốn tắt, đặt `TS_EXIT_NODE=''`, rồi chạy lại `make config`, build 
 | `log` | Reset board và ghi log serial → `results/serial.log` |
 | `bench` | Chạy bộ đo của Phase 2 (`--host <ip>` để đo baseline LAN, `--label …`) |
 | `metrics` | Tóm tắt `results/serial.log` → `results/periodic.csv` |
+| `soak` / `soak-report` | Ghi log dài hạn → `results/soak/`, và chấm các case độ ổn định ([docs/04](docs/04-soak-test.md)) |
 | `fuzz` | Fuzz bộ cắt JSON của MicroLink trên host (`--seconds N`, `--seed S`) |
 | `test` | Unit test cho tooling và test trên host (không cần board hay ESP-IDF) |
 

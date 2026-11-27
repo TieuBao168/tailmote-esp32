@@ -956,6 +956,26 @@ def cmd_metrics(args):
          "--csv", RESULTS_DIR / "periodic.csv", *args.rest])
 
 
+SOAK_DIR = RESULTS_DIR / "soak"
+
+
+@command("soak", "Long-running stability capture → results/soak/ (resets the board; Ctrl-C to stop)")
+def cmd_soak(args):
+    port = serial_port()
+    if not port:
+        die("no USB-serial board found — set SERIAL_PORT in secrets/secrets.env")
+    run([_python_with_pyserial(), BENCH_DIR / "soak.py", "capture", "--port", port,
+         "--dir", SOAK_DIR, *args.rest])
+
+
+@command("soak-report", "Grade the soak cases from results/soak/ → results/soak/report.md")
+def cmd_soak_report(args):
+    r = subprocess.run([sys.executable, str(BENCH_DIR / "soak.py"), "report", "--dir", str(SOAK_DIR),
+                        "--out", str(SOAK_DIR / "report.md"), *args.rest])
+    if r.returncode not in (0, 1):   # 1 = a case failed; the report is still valid
+        raise Die(r.returncode)
+
+
 def host_cc():
     """(compiler, PATH) for host C builds: gcc / cc / clang, also MSYS2 MinGW on Windows."""
     extra = [r"C:\msys64\mingw64\bin", r"C:\msys64\ucrt64\bin"] if WINDOWS else []
